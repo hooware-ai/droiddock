@@ -10,6 +10,8 @@
   let decoderConfiguration = null;
   let codecBytes = null;
   let waitingForKey = true;
+  let pendingMedia = [];
+  let supportProbe = null;
   let state = 'idle';
   let hasFrame = false;
   let pointer = null;
@@ -18,6 +20,7 @@
   let connectionTimer = 0;
   let generation = 0;
   const available = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
+  const MAX_DECODE_QUEUE = 8;
 
   function canControl() {
     return state === 'connected' && hasFrame && socket?.readyState === WebSocket.OPEN;
@@ -64,6 +67,22 @@
     decoderConfiguration = null;
     codecBytes = null;
     waitingForKey = true;
+    pendingMedia = [];
+    supportProbe = null;
+  }
+
+  function isCurrentProbe(probe, streamGeneration) {
+    return Boolean(probe && supportProbe === probe && streamGeneration === generation && socket);
+  }
+
+  function supportCheckError(detail) {
+    return detail
+      ? `Could not check H.264 decoder support: ${detail}. Open DroidDock in a current Chrome or Edge browser on localhost.`
+      : 'Could not check H.264 decoder support. Open DroidDock in a current Chrome or Edge browser on localhost.';
+  }
+
+  function unsupportedConfigError(codec) {
+    return `This browser cannot decode the phone's H.264 video (${codec}). Open DroidDock in a current Chrome or Edge browser on localhost.`;
   }
 
   function clearScreen() {
@@ -185,20 +204,44 @@
     throw new Error('The phone did not provide an H.264 video configuration.');
   }
 
-  function decodePacket(buffer, streamGeneration) {
-    if (buffer.byteLength < 12) throw new Error('Incomplete video packet.');
-    const header = new DataView(buffer);
-    const flags = header.getBigUint64(0, false);
-    const size = header.getUint32(8, false);
-    if (size !== buffer.byteLength - 12 || size > 16 * 1024 * 1024) throw new Error('Invalid video packet size.');
-    const config = (flags & (1n << 63n)) !== 0n;
-    const keyframe = (flags & (1n << 62n)) !== 0n;
-    let data = new Uint8Array(buffer, 12);
-    if (config) {
-      if (size > 1024 * 1024) throw new Error('Invalid video configuration size.');
-      resetDecoder();
-      codecBytes = data.slice();
-      decoderConfiguration = { codec: codecFromAnnexB(data), optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' };
+  function prepareMedia(keyframe, data) {
+    if (waitingForKey && !keyframe) return null;
+    if (keyframe) {
+      const combined = new Uint8Array(codecBytes.length + data.length);
+      combined.set(codecBytes);
+      combined.set(data, codecBytes.length);
+      waitingForKey = false;
+      return combined;
+    }
+    return data.slice();
+  }
+
+  function decodeMedia(flags, keyframe, data, prepared) {
+    if (!decoder || !codecBytes) return;
+    if (decoder.decodeQueueSize > MAX_DECODE_QUEUE) {
+      // Dropping interdependent frames can freeze the display until another IDR.
+      fail('Video decoding fell behind. Connect again to restart the live screen.');
+      return;
+    }
+    const payload = prepared ? data : prepareMedia(keyframe, data);
+    if (!payload) return;
+    decoder.decode(new EncodedVideoChunk({ type: keyframe ? 'key' : 'delta', timestamp: Number(flags & ((1n << 62n) - 1n)), data: payload }));
+  }
+
+  function enqueuePendingMedia(flags, keyframe, data) {
+    const payload = prepareMedia(keyframe, data);
+    if (!payload) return;
+    if (pendingMedia.length >= MAX_DECODE_QUEUE) {
+      fail('Video decoding fell behind. Connect again to restart the live screen.');
+      return;
+    }
+    pendingMedia.push({ flags, keyframe, data: payload });
+  }
+
+  function attachDecoder(probe, streamGeneration) {
+    if (!isCurrentProbe(probe, streamGeneration)) return;
+    try {
+      const configuration = probe.configuration;
       const activeDecoder = new VideoDecoder({
         output(frame) {
           try {
@@ -224,24 +267,68 @@
         },
       });
       decoder = activeDecoder;
-      decoder.configure(decoderConfiguration);
+      activeDecoder.configure(configuration);
+      if (decoder !== activeDecoder || streamGeneration !== generation || !socket) return;
+      const queued = pendingMedia;
+      pendingMedia = [];
+      supportProbe = null;
+      for (const packet of queued) {
+        if (decoder !== activeDecoder || streamGeneration !== generation || !socket) return;
+        decodeMedia(packet.flags, packet.keyframe, packet.data, true);
+      }
+    } catch (error) {
+      if (streamGeneration === generation && socket) fail(`Video decoding stopped: ${error.message}. Connect again to retry.`);
+    }
+  }
+
+  function startSupportProbe(streamGeneration) {
+    const configuration = decoderConfiguration;
+    const probe = { configuration };
+    supportProbe = probe;
+    if (typeof VideoDecoder.isConfigSupported !== 'function') {
+      fail(supportCheckError());
+      return;
+    }
+    // Always settle on a later turn so stale disconnect/rotation work cannot race a sync result.
+    Promise.resolve()
+      .then(() => VideoDecoder.isConfigSupported({ ...configuration }))
+      .then((result) => {
+        if (!isCurrentProbe(probe, streamGeneration)) return;
+        if (!result || result.supported !== true) {
+          fail(unsupportedConfigError(configuration.codec));
+          return;
+        }
+        attachDecoder(probe, streamGeneration);
+      })
+      .catch((error) => {
+        if (!isCurrentProbe(probe, streamGeneration)) return;
+        fail(supportCheckError(error && error.message ? String(error.message) : ''));
+      });
+  }
+
+  function decodePacket(buffer, streamGeneration) {
+    if (buffer.byteLength < 12) throw new Error('Incomplete video packet.');
+    const header = new DataView(buffer);
+    const flags = header.getBigUint64(0, false);
+    const size = header.getUint32(8, false);
+    if (size !== buffer.byteLength - 12 || size > 16 * 1024 * 1024) throw new Error('Invalid video packet size.');
+    const config = (flags & (1n << 63n)) !== 0n;
+    const keyframe = (flags & (1n << 62n)) !== 0n;
+    const data = new Uint8Array(buffer, 12);
+    if (config) {
+      if (size > 1024 * 1024) throw new Error('Invalid video configuration size.');
+      resetDecoder();
+      codecBytes = data.slice();
+      decoderConfiguration = { codec: codecFromAnnexB(data), optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' };
+      startSupportProbe(streamGeneration);
+      return;
+    }
+    if (supportProbe && !decoder) {
+      enqueuePendingMedia(flags, keyframe, data);
       return;
     }
     if (!decoder || !codecBytes) return;
-    if (decoder.decodeQueueSize > 8) {
-      // Dropping interdependent frames can freeze the display until another IDR.
-      fail('Video decoding fell behind. Connect again to restart the live screen.');
-      return;
-    }
-    if (waitingForKey && !keyframe) return;
-    if (keyframe) {
-      const combined = new Uint8Array(codecBytes.length + data.length);
-      combined.set(codecBytes);
-      combined.set(data, codecBytes.length);
-      data = combined;
-      waitingForKey = false;
-    }
-    decoder.decode(new EncodedVideoChunk({ type: keyframe ? 'key' : 'delta', timestamp: Number(flags & ((1n << 62n) - 1n)), data }));
+    decodeMedia(flags, keyframe, data, false);
   }
 
   function coordinates(event) {

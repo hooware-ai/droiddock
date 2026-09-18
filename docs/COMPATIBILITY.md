@@ -27,7 +27,7 @@ These are the project's documented requirements and client checks. They describe
 | USB | The documented first connection. | Not run in a published report. |
 | Wireless debugging | Android 11 or newer; pairing uses a private local ADB prompt. The wireless endpoint is not the device identity. | Not run in a published report. |
 | Upstream device server | Unmodified [scrcpy 4.1](https://github.com/Genymobile/scrcpy/blob/v4.1/README.md) documents Android 5.0 (API 21) as its own device prerequisite. | That floor is scrcpy's claim, not a DroidDock live result. |
-| Browser | A Chromium browser that exposes WebCodecs `VideoDecoder` and `EncodedVideoChunk`. The client refuses to connect without them and names current Chrome or Edge on localhost. | No published Chrome, Edge, or other browser result. |
+| Browser | A Chromium browser that exposes WebCodecs `VideoDecoder` and `EncodedVideoChunk`. The client refuses to connect without them, probes `VideoDecoder.isConfigSupported` for the phone's H.264 configuration before decoding, and names current Chrome or Edge on localhost. | No published Chrome, Edge, or other browser result. |
 | Other browsers | Firefox, Safari, and non-Chromium engines are not a documented live target. | Not run; do not assume support or incompatibility. |
 | Codex panel | Optional. The same local page can open in a supported local Codex browser panel. | Not a substitute for a named standalone-browser result. |
 

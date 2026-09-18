@@ -20,7 +20,7 @@ scrcpy 4.1 server  -- ADB -->    Node.js bridge  -- WebSocket -->  WebCodecs + c
                   <--          structured controls              <-- input events
 ```
 
-The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dynamically allocated loopback port. The bridge parses scrcpy framing and forwards codec/session metadata and media packets. The browser decodes frames using WebCodecs and renders them on a canvas. Input travels in the reverse direction as a small set of structured messages serialized into the pinned scrcpy control protocol.
+The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dynamically allocated loopback port. The bridge parses scrcpy framing and forwards codec/session metadata and media packets. The browser asks WebCodecs whether that stream's H.264 configuration is supported, then decodes frames onto a canvas. Input travels in the reverse direction as a small set of structured messages serialized into the pinned scrcpy control protocol.
 
 ## Repository map
 

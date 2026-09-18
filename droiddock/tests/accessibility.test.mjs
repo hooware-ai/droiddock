@@ -106,6 +106,7 @@ function loadBrowser() {
   }
   class FakeVideoDecoder {
     static latest;
+    static isConfigSupported(config) { return Promise.resolve({ supported: true, config }); }
     constructor({ output }) {
       this.output = output;
       this.state = 'configured';
@@ -138,6 +139,7 @@ function loadBrowser() {
     ArrayBuffer,
     Uint8Array,
     DataView,
+    Promise,
   });
   return { element, keyButtons, summary, more, sockets, documentHandlers, FakeVideoDecoder };
 }
@@ -163,10 +165,15 @@ async function startConnect(browser) {
   return browser.sockets[0];
 }
 
-function deliverSyntheticFrame(browser, socket) {
+async function settle() {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+async function deliverSyntheticFrame(browser, socket) {
   socket.onopen();
   socket.receive({ type: 'status', state: 'connecting' });
   socket.onmessage({ data: configPacket() });
+  await settle();
   browser.FakeVideoDecoder.latest.emit();
   return socket;
 }
@@ -227,7 +234,7 @@ test('keyboard handling keeps Tab in the browser and closes details before sendi
   assert.equal(browser.element('connect').getAttribute('aria-label'), 'Disconnect');
   assert.equal(browser.element('state').textContent, 'Connecting');
   assert.equal(browser.element('state').dataset.state, 'connecting');
-  deliverSyntheticFrame(browser, socket);
+  await deliverSyntheticFrame(browser, socket);
   assert.equal(browser.element('screen').hidden, false);
   assert.equal(browser.element('state').textContent, 'Connected');
   assert.equal(browser.element('resolution').textContent, '720 × 1280');
