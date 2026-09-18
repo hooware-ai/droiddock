@@ -43,7 +43,8 @@ async function fixture(t, implementation) {
   let ws;
   t.after(async () => {
     ws?.terminate();
-    if (child.exitCode === null) child.kill();
+    // Synthetic sessions may deliberately refuse cleanup, so SIGTERM can remain pending.
+    if (child.exitCode === null) child.kill('SIGKILL');
     await exited;
     assert.ok(root.startsWith(base + '/') || root.startsWith(base + '\\'));
     await rm(root, { recursive: true, force: true });
