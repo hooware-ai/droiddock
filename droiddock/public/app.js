@@ -83,6 +83,17 @@
     keyButtons.forEach((button) => { button.disabled = disabled; });
     $('text-input').disabled = disabled;
     $('send-text').disabled = disabled;
+    for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
+    if (disabled) clearPin();
+  }
+
+  function clearPin() {
+    $('pin-input').value = '';
+    $('pin-status').textContent = '';
+  }
+
+  function pinReady() {
+    return $('more-controls').open && $('pin-controls').open && canControl();
   }
 
   function fitScreen() {
@@ -401,6 +412,7 @@
     const panel = $('more-controls');
     if (!panel.open) return false;
     panel.open = false;
+    clearPin();
     panel.querySelector('summary').focus();
     return true;
   }
@@ -432,9 +444,46 @@
   });
   $('text-input').addEventListener('input', updateTextByteCount);
   updateTextByteCount();
+  $('pin-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const digits = $('pin-input').value;
+    clearPin();
+    if (!pinReady()) return;
+    if (!/^[0-9]{1,64}$/.test(digits)) {
+      $('pin-status').textContent = 'Type 1 to 64 digits. Nothing was sent.';
+      return;
+    }
+    try {
+      $('pin-status').textContent = send({ type: 'pin', digits })
+        ? 'Digits sent. Check your phone; use Enter only if it still needs confirmation.'
+        : 'Digits were not sent. Check the connection.';
+    } catch {
+      $('pin-status').textContent = 'Delivery is uncertain. Check your phone before trying again.';
+    }
+  });
+  for (const key of ['backspace', 'enter']) {
+    $(`pin-${key}`).addEventListener('click', () => {
+      clearPin();
+      if (!pinReady()) return;
+      try {
+        $('pin-status').textContent = send({ type: 'key', key })
+          ? 'Key sent to phone.' : 'Key was not sent. Check the connection.';
+      } catch {
+        $('pin-status').textContent = 'Delivery is uncertain. Check your phone before trying again.';
+      }
+    });
+  }
+  for (const event of ['paste', 'copy', 'cut', 'drop']) {
+    $('pin-input').addEventListener(event, (e) => e.preventDefault());
+  }
+  for (const id of ['more-controls', 'pin-controls']) {
+    $(id).addEventListener('toggle', () => { if (!$(id).open) clearPin(); });
+  }
+  window.addEventListener('blur', clearPin);
+  window.addEventListener('pagehide', clearPin);
   $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
   document.addEventListener('pointerdown', (event) => {
-    if (!$('more-controls').contains(event.target)) $('more-controls').open = false;
+    if (!$('more-controls').contains(event.target)) { $('more-controls').open = false; clearPin(); }
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -469,7 +518,7 @@
     if ($('message').classList.contains('error') && hasFrame) $('more-controls').open = true;
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) releasePointer(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { releasePointer(); clearPin(); } });
   fetch('/api/status').then((response) => {
     if (!response.ok) throw new Error();
     return response.json();

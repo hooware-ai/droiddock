@@ -25,6 +25,8 @@ Do not bind the service to a network interface, expose it through a public tunne
 
 The app relays phone video and input locally and does not intentionally record their payloads. Explicit browser paste transfers plain text to the phone clipboard; automatic clipboard synchronization is disabled. Android apps and any other software inspecting the screen or clipboard have their own behavior and policies.
 
+Phone PIN entry holds digits only temporarily in the masked field and relay memory, sends standard digit key events, and does not intentionally log or persist them. It blocks clipboard actions on that field. Clearing the field is not guaranteed memory erasure; browser autofill, extensions, developer tools, or other local software remain outside this protection. It does not detect the target prompt or prove authentication succeeded.
+
 An optional AI/browser integration may capture phone content for processing outside DroidDock. Review that integration's policies and the visible screen before use. Local configuration, environment variables, process arguments, browser diagnostics, and launcher logs can reveal device or machine information; review and redact before sharing. Do not treat ignored files as encrypted or protected from other local software.
 
 ## Changes requiring particular care

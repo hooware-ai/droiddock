@@ -4,6 +4,8 @@ Changes are recorded here when they affect users or contributors. This document 
 
 ## Unreleased
 
+- Manual, masked phone PIN entry using standard Android digit key events, with separate Backspace and Enter controls, no automatic submission or retry, and clearing on send, panel closure, focus loss and session loss. Protected-screen visibility and remote biometric authentication remain unsupported.
+
 - Connection progress reports the current startup stage (finding the phone, preparing the connection, opening the video stream) without percentages or time estimates. Messages stay sanitized, cancelled or replaced sessions cannot overwrite a newer status, and browser input stays gated until a frame renders.
 - Optional fullscreen phone view: a keyboard-accessible Enter/Exit control on the rail when the Fullscreen API is available, dock-level fullscreen so the phone and essential controls stay together, UI state from `fullscreenchange`, denied or unsupported requests leave the ordinary view and session in place, and Escape that exits fullscreen does not send Android Back.
 - Keyboard and focus accessibility on the browser chrome: a rail focus outline with at least 3:1 contrast on its light backgrounds and a canvas outline tested against black, a connection status live region outside the details panel, Escape that closes that panel before sending Android Back, and offline tests of names, tab order, and keyboard behavior on a synthetic screen.

@@ -74,6 +74,8 @@ function makeElement(extra = {}) {
 function loadBrowser() {
   const elements = new Map();
   const documentHandlers = {};
+  const windowHandlers = {};
+  const documentState = { hidden: false };
   const keyButtons = ['back', 'home', 'recents', 'volumeDown', 'volumeUp', 'power'].map((key) => makeElement({ dataset: { key }, disabled: true }));
   const summary = makeElement();
   const more = makeElement({
@@ -119,14 +121,14 @@ function loadBrowser() {
   }
   class Observer { observe() {} }
   runInNewContext(appSource, {
-    document: {
+    document: Object.assign(documentState, {
       getElementById: element,
       querySelectorAll: (sel) => sel === '[data-key]' ? keyButtons : [],
       addEventListener(name, handler) { documentHandlers[name] = handler; },
       fullscreenEnabled: false,
       fullscreenElement: null,
-    },
-    window: { addEventListener() {} },
+    }),
+    window: { addEventListener(name, handler) { windowHandlers[name] = handler; } },
     location: { protocol: 'http:', host: '127.0.0.1:3210' },
     WebSocket: FakeWebSocket,
     VideoDecoder: FakeVideoDecoder,
@@ -141,7 +143,7 @@ function loadBrowser() {
     Uint8Array,
     DataView,
   });
-  return { element, keyButtons, summary, more, sockets, documentHandlers, FakeVideoDecoder };
+  return { element, keyButtons, summary, more, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder };
 }
 
 function dispatchKey(browser, target, event) {

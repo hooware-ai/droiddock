@@ -56,6 +56,15 @@ function position(m: Record<string, unknown>, out: Buffer, offset: number): void
 export function encodeControl(input: unknown): Buffer[] {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid control message.");
   const m = input as Record<string, unknown>;
+  if (m.type === "pin") {
+    // Validate the entire request before creating any key events. Never echo digits.
+    if (typeof m.digits !== "string" || !/^[0-9]{1,64}$/.test(m.digits)) throw new Error("PIN must contain 1 to 64 digits.");
+    return [...m.digits].flatMap(digit => [0, 1].map(action => {
+      const b = Buffer.alloc(14); b[1] = action;
+      b.writeUInt32BE(7 + Number(digit), 2); // Android KEYCODE_0 through KEYCODE_9.
+      return b;
+    }));
+  }
   if (m.type === "key") {
     if (typeof m.key !== "string" || !Object.hasOwn(KEYS, m.key)) throw new Error("Unsupported key.");
     return [0, 1].map(action => {

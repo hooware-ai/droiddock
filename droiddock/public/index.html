@@ -43,6 +43,21 @@
             <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
             <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
             <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
+            <details id="pin-controls" class="pin-controls">
+              <summary aria-label="Phone PIN entry">Phone PIN entry</summary>
+              <p id="pin-help" class="text-help">Open the PIN prompt on your phone first. Protected screens may stay black. Digits go to the focused phone field; some phones submit automatically. Unsupported prompts need the physical phone.</p>
+              <form id="pin-form" class="text-form" autocomplete="off">
+                <label for="pin-input">Phone PIN</label>
+                <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]{1,64}" maxlength="64" autocomplete="off" spellcheck="false" aria-describedby="pin-help pin-privacy" disabled>
+                <button id="send-pin" type="submit" aria-label="Send PIN digits to phone" disabled>Send digits</button>
+              </form>
+              <div class="pin-actions">
+                <button id="pin-backspace" type="button" aria-label="Backspace on phone" disabled>Backspace on phone</button>
+                <button id="pin-enter" type="button" aria-label="Enter on phone" disabled>Enter on phone</button>
+              </div>
+              <p id="pin-privacy" class="text-help">Type directly. No clipboard or saved PIN. Closing this panel or leaving this window clears the field. Sending digits does not send Enter.</p>
+              <p id="pin-status" class="message" role="status" aria-live="polite"></p>
+            </details>
             <p id="message" class="message" role="status" aria-live="polite">Phone must be connected through ADB.</p>
           </div>
         </details>
