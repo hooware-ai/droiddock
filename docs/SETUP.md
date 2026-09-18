@@ -2,6 +2,25 @@
 
 The supported host is **Windows**. Use a Chromium browser with WebCodecs support and an Android phone authorized for debugging. Codex is optional; the same local page works in a normal browser. Other operating systems are not supported for live setup by this runbook. Offline CI does not validate device discovery, video, or control on those hosts.
 
+## Compatibility matrix
+
+The following matrix records the combinations covered by this setup guide and
+the repository's checks. A supported entry still requires the prerequisites
+listed below it; it does not imply that every Android device or browser build
+has been tested.
+
+| Component | Supported and checked | Outside this guide |
+| --- | --- | --- |
+| Host | Windows PowerShell 5.1 or PowerShell 7 | macOS and Linux live setup |
+| Browser | Chromium with WebCodecs | Firefox and Safari |
+| Device transport | Authorized Android device over USB or Android 11+ wireless debugging | iOS and unauthorised ADB devices |
+| Offline checks | Node.js 24+, `npm ci`, typecheck, build, test | Device discovery and rendered video |
+
+Run the offline checks before connecting a device, then run
+`node scripts/Test-DroidDock.mjs --live` for the supported Windows and Android
+path. Report the host, browser family, Android version, transport, and whether
+the result is offline or live when filing a compatibility issue.
+
 ## Install
 
 From a new checkout of [hooware-ai/droiddock](https://github.com/hooware-ai/droiddock):
