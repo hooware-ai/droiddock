@@ -98,3 +98,16 @@ test('invalid PIN and clipboard events do not send; uncertain send clears withou
   submit(b);
   assert.equal(attempts, 1);
 });
+
+
+test('steady video frames do not rewrite PIN controls or clear a draft', async () => {
+  const { b } = await connected();
+  let writes = 0;
+  for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) {
+    Object.defineProperty(b.element(id), 'disabled', { get() { return false; }, set() { writes++; }, configurable: true });
+  }
+  b.element('pin-input').value = '0123';
+  for (let i = 0; i < 120; i++) b.FakeVideoDecoder.latest.emit();
+  assert.equal(writes, 0);
+  assert.equal(b.element('pin-input').value, '0123');
+});

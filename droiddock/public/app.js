@@ -14,6 +14,7 @@
   let codecBytes = null;
   let waitingForKey = true;
   let state = 'idle';
+  let pinControlsDisabled = null;
   let hasFrame = false;
   let pointer = null;
   let pendingMove = null;
@@ -83,8 +84,12 @@
     keyButtons.forEach((button) => { button.disabled = disabled; });
     $('text-input').disabled = disabled;
     $('send-text').disabled = disabled;
-    for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
-    if (disabled) clearPin();
+    // updateControls also runs after frames; touch PIN DOM only when readiness changes.
+    if (pinControlsDisabled !== disabled) {
+      pinControlsDisabled = disabled;
+      for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
+      if (disabled) clearPin();
+    }
   }
 
   function clearPin() {
