@@ -101,6 +101,8 @@ The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for 
 
 ## Recovery
 
+For expanded symptom → cause → fix walkthroughs with synthetic ADB output, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 | Situation | Action |
 | --- | --- |
 | Interrupted install | Rerun the installer; preserve local configuration and edits. |
