@@ -11,6 +11,9 @@ test('only a complete, unambiguous supported keyguard section yields lock eviden
   assert.equal(parseLockState(dump()), 'locked-awake');
   assert.equal(parseLockState(dump({ showing: 'false' })), 'unlocked');
   assert.equal(parseLockState(dump({ occluded: 'true' })), 'other');
+  // Always-on displays keep screen power on while Android is non-interactive.
+  assert.equal(parseLockState(dump({ interactiveState: 'INTERACTIVE_STATE_SLEEP' })), 'other');
+  assert.equal(parseLockState(dump({ screenState: 'SCREEN_STATE_OFF' })), 'other');
   assert.equal(parseLockState(dump({ screenState: 'SCREEN_STATE_OFF', interactiveState: 'INTERACTIVE_STATE_SLEEP' })), 'other');
   for (const screenState of ['SCREEN_STATE_TURNING_ON', 'SCREEN_STATE_TURNING_OFF']) {
     assert.equal(parseLockState(dump({ screenState })), 'other');
@@ -22,7 +25,6 @@ test('only a complete, unambiguous supported keyguard section yields lock eviden
     '', 'showing=true\noccluded=false\nscreenState=SCREEN_STATE_ON\ninteractiveState=INTERACTIVE_STATE_AWAKE',
     dump().replace('    occluded=false\n', ''), dump({ showing: 'maybe' }), dump({ screenState: '2' }),
     dump({ interactiveState: 'AWAKE' }), dump() + dump(),
-    dump({ screenState: 'SCREEN_STATE_OFF' }), dump({ interactiveState: 'INTERACTIVE_STATE_SLEEP' }),
     'mKeyguardOccluded=true\n' + dump(), 'mKeyguardOccluded=unknown\n' + dump(),
     'mKeyguardOccluded=false\nmKeyguardOccluded=false\n' + dump(),
     dump().replace('    showing=true', '    showing=true\n    showing=false'),

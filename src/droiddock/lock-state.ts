@@ -28,8 +28,8 @@ export function parseLockState(output: string): LockState {
       !/^INTERACTIVE_STATE_(SLEEP|WAKING|AWAKE|GOING_TO_SLEEP)$/.test(interactive ?? "")) return "unknown";
   const outerOccluded = [...output.matchAll(/\bmKeyguardOccluded=([^\s]+)/g)];
   if (outerOccluded.length > 1 || (outerOccluded.length === 1 && outerOccluded[0][1] !== occluded)) return "unknown";
-  if ((screen === "SCREEN_STATE_ON" && interactive === "INTERACTIVE_STATE_SLEEP") ||
-      (screen === "SCREEN_STATE_OFF" && interactive === "INTERACTIVE_STATE_AWAKE")) return "unknown";
+  // Screen power and interactivity are independent: an always-on display can
+  // remain ON while asleep. Only ON plus AWAKE qualifies for assistance.
   if (showing === "false") return "unlocked";
   return occluded === "false" && screen === "SCREEN_STATE_ON" && interactive === "INTERACTIVE_STATE_AWAKE" ? "locked-awake" : "other";
 }
