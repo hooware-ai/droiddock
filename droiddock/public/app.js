@@ -125,6 +125,7 @@
   function openPin(manual = false) {
     if (document.hidden || !browserFocused) return;
     $('more-controls').open = false;
+    $('help-controls').open = false;
     $('pin-controls').hidden = false;
     $('pin-toggle').setAttribute('aria-expanded', 'true');
     if (lockState === 'locked-awake') lockShown = true;
@@ -224,6 +225,10 @@
   function holdEscapeFromSendingBack(event) {
     if (event.defaultPrevented) return true;
     if (closePin(true, true)) { event.preventDefault(); return true; }
+    if (closeHelpControls()) {
+      event.preventDefault();
+      return true;
+    }
     if (closeMoreControls()) {
       event.preventDefault();
       return true;
@@ -500,6 +505,13 @@
       $('message').classList.remove('error');
     }
   });
+  function closeHelpControls() {
+    const panel = $('help-controls');
+    if (!panel?.open) return false;
+    panel.open = false;
+    panel.querySelector?.('summary')?.focus();
+    return true;
+  }
   function closeMoreControls() {
     const panel = $('more-controls');
     if (!panel.open) return false;
@@ -512,7 +524,7 @@
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
     // Keep normal Tab navigation available; use text entry for tab characters.
     if (event.key === 'Tab') return;
-    // Details first, then a fullscreen exit, before Escape can send Android Back.
+    // PIN entry, Help, Details, and fullscreen consume Escape before Android Back.
     if (event.key === 'Escape' && holdEscapeFromSendingBack(event)) return;
     if (!canControl()) return;
     const key = keyboardKeys[event.key];
@@ -581,7 +593,22 @@
     }
     syncLockSubscription();
   });
-  $('more-controls').addEventListener('toggle', () => { if ($('more-controls').open) closePin(true); });
+  $('more-controls').addEventListener('toggle', () => {
+    if ($('more-controls').open) {
+      closePin(true);
+      $('help-controls').open = false;
+    }
+  });
+  $('help-controls').addEventListener('toggle', () => {
+    if ($('help-controls').open) {
+      closePin(true);
+      $('more-controls').open = false;
+    }
+  });
+  $('close-help').addEventListener('click', (event) => {
+    event.preventDefault();
+    closeHelpControls();
+  });
   window.addEventListener('blur', () => { browserFocused = false; closePin(false); syncLockSubscription(); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
   window.addEventListener('pagehide', () => { closePin(false); disconnect(); });
@@ -589,9 +616,11 @@
   document.addEventListener('pointerdown', (event) => {
     if (!$('more-controls').contains(event.target)) $('more-controls').open = false;
     if (!$('pin-controls').contains(event.target) && !$('pin-toggle').contains(event.target)) closePin(true);
+    const help = $('help-controls');
+    if (!help.contains(event.target)) help.open = false;
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
     holdEscapeFromSendingBack(event);
   });
   if (fullscreenButton) {

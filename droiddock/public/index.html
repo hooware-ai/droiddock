@@ -37,6 +37,46 @@
         </div>
         <span class="control-divider" aria-hidden="true"></span>
         <button id="fullscreen" class="icon-button" type="button" hidden title="Enter fullscreen" aria-label="Enter fullscreen" aria-pressed="false"><svg class="fullscreen-enter" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><svg class="fullscreen-exit" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg><span id="fullscreen-label" class="sr-only">Enter fullscreen</span></button>
+        <details id="help-controls" class="more-controls">
+          <summary class="icon-button" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.2 9.5a2.8 2.8 0 1 1 4 2.4c-.7.4-1.2 1-1.2 1.8V14M12 17h.01"/></svg></summary>
+          <div id="help-panel" class="details-panel help-panel">
+            <h2 id="help-title">Help</h2>
+            <p class="text-help">These notes describe the current DroidDock controls. Opening Help does not send input to the phone. Help stays available while disconnected.</p>
+            <h3>Pointer</h3>
+            <ul>
+              <li>Tap, drag, long-press, and scroll on the live phone video.</li>
+              <li>Phone controls stay unavailable until a live frame appears.</li>
+            </ul>
+            <h3>Keyboard</h3>
+            <ul>
+              <li>Focus the phone screen to type. Backspace, Enter, and arrows go to the phone.</li>
+              <li>Tab stays in the browser. It does not send a Tab key to the phone.</li>
+              <li>Browser shortcuts that use Ctrl, Alt, or Command stay in the browser.</li>
+              <li>DroidDock does not add global shortcut interception.</li>
+            </ul>
+            <h3>Escape</h3>
+            <ul>
+              <li>Escape first closes PIN entry and returns focus to its button. With PIN entry closed, Escape closes Help and returns focus to Help.</li>
+              <li>Escape then closes Details and returns focus to Details and text input.</li>
+              <li>Escape that exits fullscreen does not send Android Back.</li>
+              <li>With PIN entry, Help, and Details closed, and the phone screen focused, Escape sends Back.</li>
+            </ul>
+            <h3>Paste</h3>
+            <ul>
+              <li>Press Ctrl+V over the focused phone screen to paste plain text.</li>
+              <li>Unicode, emoji, and multiline text are supported when the Android app accepts them, up to 64 KiB of UTF-8.</li>
+              <li>Paste changes the phone clipboard. Images and files are not supported.</li>
+            </ul>
+            <h3>Fallback text</h3>
+            <ul>
+              <li>Open Details and text input for fallback text. It uses scrcpy text injection.</li>
+              <li>Supports ASCII and some accented letters, not every Unicode character.</li>
+              <li>Limited to 300 UTF-8 bytes per send. A live N / 300 bytes counter uses the same check as Send.</li>
+              <li>Over-limit text stays in the field so it can be shortened.</li>
+            </ul>
+            <button id="close-help" type="button" aria-label="Close help">Close</button>
+          </div>
+        </details>
         <button id="pin-toggle" class="icon-button" type="button" aria-label="Phone PIN entry" title="Phone PIN entry" aria-expanded="false" aria-controls="pin-controls">PIN</button>
             <section id="pin-controls" class="details-panel pin-controls" role="dialog" aria-labelledby="pin-title" aria-describedby="pin-help" hidden>
               <div class="pin-heading"><strong id="pin-title">Phone unlock</strong><button id="close-pin" type="button" aria-label="Close PIN entry">Close</button></div>

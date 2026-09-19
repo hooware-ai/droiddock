@@ -289,3 +289,88 @@ test('PIN draft, submit, and every clearing path never persist digits or any dat
   toggle(b, false);
   assert.deepEqual(saved.writes, [...expected, [preferenceKey, 'false']]);
 });
+
+
+test('PIN has first Escape priority before Help and Details and restores its control without Android Back', async () => {
+  const { b, socket } = await connected();
+  b.element('pin-toggle').handlers.click();
+  b.element('pin-input').value = '0123';
+  // Exercise an overlapping state before the native details toggle events settle.
+  b.help.open = true;
+  b.more.open = true;
+  const before = socket.sent.length;
+  const pinEscape = dispatchKey(b, b.element('screen'), keyEvent('Escape'));
+  assert.equal(pinEscape.defaultPrevented, true);
+  assert.equal(b.element('pin-controls').hidden, true);
+  assert.equal(b.element('pin-input').value, '');
+  assert.equal(b.element('pin-toggle').focused, true);
+  assert.equal(b.help.open, true);
+  assert.equal(b.more.open, true);
+  assert.equal(socket.sent.length, before);
+  dispatchKey(b, b.element('screen'), keyEvent('Escape'));
+  assert.equal(b.help.open, false);
+  assert.equal(b.helpSummary.focused, true);
+  assert.equal(b.more.open, true);
+  assert.equal(socket.sent.length, before);
+  dispatchKey(b, b.element('screen'), keyEvent('Escape'));
+  assert.equal(b.more.open, false);
+  assert.equal(b.summary.focused, true);
+  assert.equal(socket.sent.length, before);
+  dispatchKey(b, b.element('screen'), keyEvent('Escape'));
+  assert.deepEqual(socket.sent.slice(before), [{ type: 'key', key: 'back' }]);
+});
+
+test('opening Help or Details dismisses and clears PIN without reopening the same detected lock', async () => {
+  for (const panelName of ['help', 'more']) {
+    const { b, socket } = await connected();
+    toggle(b, true);
+    lock(socket, 'locked-awake');
+    b.element('pin-input').value = '0123';
+    b[panelName].open = true;
+    b[panelName].handlers.toggle();
+    assert.equal(b.element('pin-controls').hidden, true);
+    assert.equal(b.element('pin-input').value, '');
+    assert.equal(b.element('pin-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(b[panelName].open, true);
+    assert.equal(b[panelName === 'help' ? 'more' : 'help'].open, false);
+    lock(socket, 'locked-awake');
+    assert.equal(b.element('pin-controls').hidden, true);
+    assert.equal(b[panelName].open, true);
+    assert.equal(socket.sent.some(packet => ['pin', 'key'].includes(packet.type)), false);
+  }
+});
+
+test('manual and automatic PIN opening close Help and Details and preserve their focus contract', async () => {
+  for (const automatic of [false, true]) {
+    const { b, socket } = await connected();
+    if (automatic) toggle(b, true);
+    b.help.open = true;
+    b.more.open = true;
+    if (automatic) lock(socket, 'locked-awake');
+    else b.element('pin-toggle').handlers.click();
+    assert.equal(b.element('pin-controls').hidden, false);
+    assert.equal(b.help.open, false);
+    assert.equal(b.more.open, false);
+    assert.equal(b.element('pin-input').focused, !automatic);
+    assert.equal(b.helpSummary.focused, false);
+    assert.equal(b.summary.focused, false);
+    b.element('pin-input').value = '0123';
+    b.element('close-pin').handlers.click();
+    assert.equal(b.element('pin-input').value, '');
+    assert.equal(b.element('pin-toggle').focused, true);
+    assert.equal(socket.sent.some(packet => ['pin', 'key'].includes(packet.type)), false);
+  }
+});
+
+test('Help and Details remain mutually exclusive when their native toggle events fire', () => {
+  const b = loadBrowser();
+  b.more.open = true;
+  b.help.open = true;
+  b.help.handlers.toggle();
+  assert.equal(b.help.open, true);
+  assert.equal(b.more.open, false);
+  b.more.open = true;
+  b.more.handlers.toggle();
+  assert.equal(b.more.open, true);
+  assert.equal(b.help.open, false);
+});

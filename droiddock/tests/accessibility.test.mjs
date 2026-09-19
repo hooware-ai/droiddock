@@ -92,8 +92,17 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
       return node === more || node === summary || node === element('text-input') || node === element('send-text') || node === element('message') || node === element('text-byte-count') || node === element('text-input-help');
     },
   });
+  const helpSummary = makeElement();
+  const help = makeElement({
+    open: false,
+    querySelector(sel) { return sel === 'summary' ? helpSummary : null; },
+    contains(node) {
+      return node === help || node === helpSummary || node === element('close-help') || node === element('help-panel');
+    },
+  });
   function element(id) {
     if (id === 'more-controls') return more;
+    if (id === 'help-controls') return help;
     if (!elements.has(id)) {
       elements.set(id, makeElement({
         hidden: 'hidden' in tagById(id).attrs,
@@ -105,7 +114,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
     }
     return elements.get(id);
   }
-  for (const id of ['screen', 'connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'text-byte-count', 'text-input-help', 'screen-area']) element(id);
+  for (const id of ['screen', 'connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'text-byte-count', 'text-input-help', 'screen-area', 'close-help', 'help-panel']) element(id);
   const sockets = [];
   class FakeWebSocket {
     static OPEN = 1;
@@ -157,7 +166,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
     Uint8Array,
     DataView,
   });
-  return { element, keyButtons, summary, more, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests };
+  return { element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests };
 }
 
 function dispatchKey(browser, target, event) {
@@ -209,6 +218,7 @@ test('browser chrome exposes names, a live status, and natural tab order on the 
   assert.match(html, /aria-describedby="text-input-help text-byte-count"/);
   assert.match(html, /<button id="send-text"[^>]*>Send<\/button>/);
   assert.match(html, /role="group" aria-label="Phone controls"/);
+  assert.match(html, /<summary class="icon-button" aria-label="Help"/);
   assert.match(html, /<summary class="icon-button" aria-label="Details and text input"/);
   const emptyMessage = tagById('empty-message');
   assert.equal(emptyMessage.attrs.role, 'status');
@@ -228,8 +238,9 @@ test('browser chrome exposes names, a live status, and natural tab order on the 
   const connectAt = html.indexOf('id="connect"');
   const firstKey = html.indexOf('data-key="back"');
   const fullscreenAt = html.indexOf('id="fullscreen"');
+  const helpAt = html.indexOf('id="help-controls"');
   const detailsAt = html.indexOf('id="more-controls"');
-  assert.ok(canvasAt < connectAt && connectAt < firstKey && firstKey < fullscreenAt && fullscreenAt < detailsAt);
+  assert.ok(canvasAt < connectAt && connectAt < firstKey && firstKey < fullscreenAt && fullscreenAt < helpAt && helpAt < detailsAt);
 });
 
 test('visible focus styles meet a 3:1 contrast ratio on the empty rail and dark screen', () => {

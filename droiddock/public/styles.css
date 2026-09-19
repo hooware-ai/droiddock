@@ -67,3 +67,8 @@ h2{font-size:18px;font-weight:600;letter-spacing:-.3px;margin:0 0 9px}
 .pin-preference input{margin:3px 0 0;flex-shrink:0}
 .pin-actions{display:flex;flex-wrap:wrap;gap:6px}
 #pin-toggle[aria-expanded=true]{background:#e7edf3}
+.help-panel h2{font-size:15px;margin:0}
+.help-panel h3{font-size:12px;font-weight:600;letter-spacing:0;margin:4px 0 0;color:var(--slate)}
+.help-panel ul{margin:0;padding-left:1.15em}
+.help-panel li{font-size:11px;line-height:1.45;color:var(--muted)}
+.help-panel #close-help{align-self:flex-start}

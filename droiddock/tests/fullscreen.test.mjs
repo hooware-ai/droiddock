@@ -78,6 +78,14 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
       return node === more || node === summary || node === element('text-input') || node === element('send-text') || node === element('message');
     },
   });
+  const helpSummary = makeElement();
+  const help = makeElement({
+    open: false,
+    querySelector(sel) { return sel === 'summary' ? helpSummary : null; },
+    contains(node) {
+      return node === help || node === helpSummary || node === element('close-help') || node === element('help-panel');
+    },
+  });
   const areaRect = { width: 360, height: 640, left: 0, top: 0 };
   const screenArea = makeElement({
     getBoundingClientRect() { return { ...areaRect }; },
@@ -113,6 +121,7 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
   }
   function element(id) {
     if (id === 'more-controls') return more;
+    if (id === 'help-controls') return help;
     if (id === 'dock') return dock;
     if (id === 'screen-area') return screenArea;
     if (id === 'screen') return canvas;
@@ -125,7 +134,7 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
     }
     return elements.get(id);
   }
-  for (const id of ['connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'fullscreen-label']) element(id);
+  for (const id of ['connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'fullscreen-label', 'close-help', 'help-panel']) element(id);
   const sockets = [];
   class FakeWebSocket {
     static OPEN = 1;
@@ -186,7 +195,7 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
     Uint8Array,
     DataView,
   });
-  return { element, keyButtons, summary, more, sockets, documentHandlers, FakeVideoDecoder, dock, fullscreen, areaRect, docState };
+  return { element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, FakeVideoDecoder, dock, fullscreen, areaRect, docState };
 }
 
 function dispatchKey(browser, target, event) {
@@ -337,6 +346,23 @@ test('Escape after a change-first fullscreen exit still does not send Back', asy
   assert.equal(socket.sent.length, before);
   dispatchKey(browser, browser.element('screen'), keyEvent('a'));
   assert.deepEqual(socket.sent.at(-1), { type: 'text', text: 'a' });
+});
+
+test('Help Escape closes the panel before fullscreen or Android Back', async () => {
+  const { browser, socket } = await connectedBrowser();
+  await browser.fullscreen.handlers.click();
+  browser.help.open = true;
+  const before = socket.sent.length;
+  const dismiss = dispatchKey(browser, browser.element('screen'), keyEvent('Escape'));
+  assert.equal(dismiss.defaultPrevented, true);
+  assert.equal(browser.help.open, false);
+  assert.equal(browser.helpSummary.focused, true);
+  assert.equal(browser.docState.fullscreenElement, browser.dock);
+  assert.equal(socket.sent.length, before);
+  const stillFullscreen = dispatchKey(browser, browser.element('screen'), keyEvent('Escape'));
+  assert.equal(stillFullscreen.defaultPrevented, false);
+  assert.equal(browser.docState.fullscreenElement, browser.dock);
+  assert.ok(!socket.sent.some((message) => message.type === 'key' && message.key === 'back'));
 });
 
 test('Details and canvas Escape keep their windowed behavior', async () => {
