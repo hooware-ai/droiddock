@@ -108,7 +108,7 @@ Automatic opening preserved keyboard focus. Closing the panel cleared an
 unsent synthetic draft and suppressed reopening in that lock session.
 Reconnecting reopened the panel, and the user confirmed a physical fingerprint
 unlock while the panel closed and the connection remained active. No PIN was
-sent by the tester. This is a focused feature check, not a complete compatibility
+sent by the automation. This is a focused feature check, not a complete compatibility
 matrix or evidence for other manufacturers.
 
 Initial matched synthetic-animation windows at the same viewport measured
