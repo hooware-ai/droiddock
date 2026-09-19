@@ -7,6 +7,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { ScrcpySession } from "./session.js";
 import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
+import { LockStateMonitor } from "./lock-state.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const installationId = createHash("sha256").update(resolve(root).toLowerCase()).digest("hex").slice(0, 16);
@@ -29,6 +30,7 @@ let shuttingDown = false;
 let connectionIntent = 0;
 const cleanupSessions = new Set<ScrcpySession>();
 const cleanupMessage = "Phone cleanup could not be confirmed. Restore the phone connection and select Connect to retry cleanup.";
+const lockMonitor = new LockStateMonitor(update => send(update));
 
 const connectingProgress = new Set([
   "Finding the configured phone…",
@@ -43,6 +45,11 @@ function status() { return { app: "DroidDock", type: "status", state, message, d
 function send(value: unknown) { if (client?.readyState === WebSocket.OPEN) client.send(JSON.stringify(value)); }
 function setState(next: State, detail: string) {
   if (state === next && message === detail) return;
+  if (next !== "connected") lockMonitor.connected();
+  else if (state !== "connected" && session) {
+    const current = session;
+    lockMonitor.connected(signal => current.readLockState(signal));
+  }
   state = next; message = detail; send(status());
 }
 function applyConnectingProgress(current: ScrcpySession, detail: string) {
@@ -172,6 +179,7 @@ sockets.on("connection", (ws: WebSocket) => {
     previous.close(4001, "Phone opened elsewhere");
   }
   client = ws;
+  lockMonitor.reset();
   let alive = true, controls = 0;
   const heartbeat = setInterval(() => { if (!alive) { ws.terminate(); return; } alive = false; controls = 0; ws.ping(); }, 15000);
   ws.on("pong", () => { alive = true; });
@@ -183,6 +191,12 @@ sockets.on("connection", (ws: WebSocket) => {
       const input = JSON.parse(data.toString());
       if (input?.type === "connect") { void connect(); return; }
       if (input?.type === "disconnect") { void stop(); return; }
+      if (input?.type === "lockSubscription") {
+        if (typeof input.enabled !== "boolean" || typeof input.visible !== "boolean" ||
+            Object.keys(input).some(key => !["type", "enabled", "visible"].includes(key))) throw new Error("Invalid lock-state subscription.");
+        lockMonitor.subscribe(input.enabled, input.visible);
+        return;
+      }
       if (state !== "connected" || !session) throw new Error("Connect your phone first.");
       session.input(input);
     } catch (error) { send({ type: "inputError", message: error instanceof SyntaxError ? "Invalid JSON control message." : (error as Error).message }); }

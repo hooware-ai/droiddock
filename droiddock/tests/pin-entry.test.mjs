@@ -7,7 +7,7 @@ function submit(b) { b.element('pin-form').handlers.submit({ preventDefault() {}
 async function connected() {
   const b = loadBrowser();
   const socket = deliverSyntheticFrame(b, await startConnect(b));
-  b.more.open = b.element('pin-controls').open = true;
+  b.element('pin-toggle').handlers.click();
   return { b, socket };
 }
 
@@ -46,18 +46,20 @@ test('manual send clears PIN, preserves leading zero, never auto-sends Enter or 
 
 test('closed panel, pre-frame and handed-off views never send PIN controls', async () => {
   const b = loadBrowser();
-  b.more.open = b.element('pin-controls').open = true;
+  b.element('pin-toggle').handlers.click();
   const socket = await startConnect(b);
+  b.element('pin-toggle').handlers.click();
+  assert.equal(b.element('pin-controls').hidden, false);
   for (const id of ['pin-input', 'send-pin', 'pin-enter', 'pin-backspace']) assert.equal(b.element(id).disabled, true);
   b.element('pin-input').value = '0123'; submit(b);
   assert.equal(socket.sent.length, 0);
   deliverSyntheticFrame(b, socket);
-  b.element('pin-controls').open = false;
+  b.element('close-pin').handlers.click();
   const before = socket.sent.length;
   b.element('pin-input').value = '0123'; submit(b);
   b.element('pin-enter').handlers.click();
   assert.equal(socket.sent.length, before);
-  b.element('pin-controls').open = true;
+  b.element('pin-toggle').handlers.click();
   b.element('pin-input').value = '0123'; socket.receive({ type: 'moved' });
   assert.equal(b.element('pin-input').value, '');
   b.element('pin-input').value = '0123'; submit(b);
@@ -65,18 +67,19 @@ test('closed panel, pre-frame and handed-off views never send PIN controls', asy
 });
 
 test('PIN clears on panel close, focus loss, page hide, visibility loss, and disconnect', async () => {
-  const { b } = await connected();
   const clearEvents = [
-    () => { b.element('pin-controls').open = false; b.element('pin-controls').handlers.toggle(); },
-    () => { b.more.open = false; b.more.handlers.toggle(); },
-    () => b.windowHandlers.blur(),
-    () => b.windowHandlers.pagehide(),
-    () => { b.documentState.hidden = true; b.documentHandlers.visibilitychange(); },
-    () => b.element('connect').handlers.click(),
+    b => b.element('close-pin').handlers.click(),
+    b => { b.more.open = true; b.more.handlers.toggle(); },
+    b => b.windowHandlers.blur(),
+    b => b.windowHandlers.pagehide(),
+    b => { b.documentState.hidden = true; b.documentHandlers.visibilitychange(); },
+    b => b.element('connect').handlers.click(),
   ];
   for (const clear of clearEvents) {
-    b.element('pin-input').value = '0123'; await clear();
+    const { b } = await connected();
+    b.element('pin-input').value = '0123'; await clear(b);
     assert.equal(b.element('pin-input').value, '');
+    assert.equal(b.element('pin-controls').hidden, true);
   }
 });
 

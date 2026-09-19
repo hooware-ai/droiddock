@@ -95,3 +95,36 @@ Notes: short sanitized detail. No serials, paths, addresses, or private screensh
 ```
 
 Failures that include a minimal sanitized reproduction belong in a [bug report](https://github.com/hooware-ai/droiddock/issues/new?template=bug_report.yml). Do not paste `config.local.json`, full environment output, or raw diagnostic logs.
+
+## Automatic unlock panel
+
+Automatic lock detection is opt-in and uses a conservative parser for Android window-policy diagnostics. It is not guaranteed across Android versions or manufacturers. Other manufacturers remain **unverified** until tested; unsupported output disables automatic assistance without removing manual PIN entry. Offline fixtures prove parser and popup behavior only. Live lock, biometric unlock, dismissal, reconnect, and comparable 60-second video measurements must be reported separately, without phone identifiers or screenshots containing private data.
+
+### Focused validation on September 19, 2026
+
+The automatic-unlock implementation at `7d89b7c` was compared with main at
+`2ccaec3` on one authorized Android phone in the Codex browser on Windows.
+Automatic opening preserved keyboard focus. Closing the panel cleared an
+unsent synthetic draft and suppressed reopening in that lock session.
+Reconnecting reopened the panel, and the user confirmed a physical fingerprint
+unlock while the panel closed and the connection remained active. No PIN was
+sent by the automation. This is a focused feature check, not a complete compatibility
+matrix or evidence for other manufacturers.
+
+Initial matched synthetic-animation windows at the same viewport measured
+59.84 fps on main and 59.98 fps with detection enabled, over approximately
+60 seconds each. Longer sessions on **both revisions** also reproduced the
+existing “Video decoding fell behind” guard stop. Candidate runs with detection
+disabled reproduced it too. Those failures remain tracked in
+[issue #39](https://github.com/hooware-ai/droiddock/issues/39); the short passing
+windows do not establish sustained video stability or a hardware root cause.
+The message proves that the application stopped the stream at its queue limit;
+it does not prove that the decoder could not have recovered from a brief delay.
+
+The decoder reset, cleanup, configuration parsing, and packet-decoding functions
+are unchanged between these revisions. A controlled reproduction against both
+revisions produces the same queue-depth-nine failure when decoding stops
+draining. Candidate regression tests additionally compare detection off and on
+with healthy delivery, bounded bursts, and a stalled decoder. These are
+simulated decoder tests; they establish the existing guard behavior, not why a
+real browser queue grows or whether a brief delay could recover safely.

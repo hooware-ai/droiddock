@@ -154,7 +154,7 @@ test('handoff during session startup ignores obsolete callbacks and stale socket
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const name of ['server.js', 'config.js', 'protocol.js']) {
+    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) {
       await copyFile(join('dist/droiddock', name), join(fixtureDist, name));
     }
     // File gates make startup and late callbacks deterministic without touching the
@@ -262,7 +262,7 @@ async function withSessionFixture(name, sessionSource, run, extraEnv = {}) {
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const file of ['server.js', 'config.js', 'protocol.js']) {
+    for (const file of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) {
       await copyFile(join('dist/droiddock', file), join(fixtureDist, file));
     }
     await writeFile(join(fixtureDist, 'session.js'), sessionSource);
@@ -429,6 +429,50 @@ test('startup failure reports error without a connected or rendered state', { ti
         'Opening the video stream…',
         'Disconnecting and cleaning up the phone connection…',
       ].includes(message)));
+    }, serverPath);
+  });
+});
+
+test('takeover cancels a pending lock read and the replacement must subscribe independently', { timeout: 15000 }, async () => {
+  await withSessionFixture('lock-handoff-', `
+    import { appendFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    let nextId = 0;
+    export class ScrcpySession {
+      constructor(root, onEvent) { Object.assign(this, { root, onEvent, id: ++nextId }); }
+      async start() { this.onEvent({ type: 'video', sessionId: this.id }); }
+      async stop() {}
+      input(value) { this.onEvent({ type: 'video', sessionId: this.id, input: value.type }); }
+      async readLockState(signal) {
+        await appendFile(join(this.root, 'lock-events.log'), 'read:' + this.id + '\\n');
+        if (this.id === 1) {
+          if (!signal.aborted) await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+          await appendFile(join(this.root, 'lock-events.log'), 'abort:' + this.id + '\\n');
+          return 'locked-awake';
+        }
+        return 'unlocked';
+      }
+    }
+  `, async (fixture, serverPath) => {
+    await withServer(async ({ open, status }) => {
+      const readEvents = async () => { try { return await readFile(join(fixture, 'lock-events.log'), 'utf8'); } catch { return ''; } };
+      const first = await open();
+      first.ws.send(JSON.stringify({ type: 'lockSubscription', enabled: true, visible: true }));
+      first.ws.send(JSON.stringify({ type: 'connect' }));
+      await until(async () => (await readEvents()).includes('read:1'), 'first read');
+      const replacement = await open('/stream?takeover=1');
+      replacement.ws.send(JSON.stringify({ type: 'connect' }));
+      await until(async () => (await status()).state === 'connected', 'replacement connection');
+      await until(async () => (await readEvents()).includes('abort:1'), 'old lock read cancellation');
+      await delay(2100);
+      assert.equal((await readEvents()).includes('read:2'), false, 'new owner never inherits subscription');
+      assert.equal(replacement.messages.some(value => value.type === 'lockState' && value.state === 'locked-awake'), false);
+      replacement.ws.send(JSON.stringify({ type: 'lockSubscription', enabled: true, visible: true }));
+      await until(() => replacement.messages.some(value => value.type === 'lockState' && value.state === 'unlocked'), 'replacement read');
+      replacement.ws.send(JSON.stringify({ type: 'key', key: 'home' }));
+      await until(() => replacement.messages.some(value => value.input === 'key'), 'phone control remains available');
+      replacement.ws.send(JSON.stringify({ type: 'disconnect' }));
+      await until(async () => (await status()).state === 'idle', 'cleanup');
     }, serverPath);
   });
 });

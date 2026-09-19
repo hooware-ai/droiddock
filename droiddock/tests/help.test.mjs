@@ -62,11 +62,12 @@ test('Help is a named static panel that documents pointer, keyboard, paste, and 
   assert.match(css, /width:min\(270px,calc\(100vw - var\(--rail\) - 16px\)\)/);
   assert.doesNotMatch(html, /id="help-controls"[^>]*disabled/);
   assert.doesNotMatch(html, /id="close-help"[^>]*disabled/);
-  assert.doesNotMatch(appSource, /localStorage|sessionStorage/);
+  assert.doesNotMatch(appSource, /sessionStorage/);
 });
 
-test('Help stays usable while disconnected and restores focus without phone commands', () => {
-  const browser = loadBrowser();
+test('Help stays usable while disconnected and restores focus without phone commands or storage writes', () => {
+  const writes = [];
+  const browser = loadBrowser({ localStorage: { getItem: () => null, setItem(...args) { writes.push(args); } } });
   assert.equal(browser.help.open, false);
   assert.equal(browser.element('close-help').disabled, false);
   assert.ok(browser.keyButtons.every((button) => button.disabled));
@@ -89,6 +90,7 @@ test('Help stays usable while disconnected and restores focus without phone comm
   assert.equal(browser.helpSummary.focused, true);
   assert.equal(browser.more.open, false);
   assert.equal(browser.sockets.length, 0);
+  assert.deepEqual(writes, []);
 });
 
 test('Help actions send no phone commands and close before Details or Android Back', async () => {

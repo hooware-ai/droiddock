@@ -25,7 +25,7 @@ async function fixture(t, implementation) {
   const root = await mkdtemp(join(base, 'security-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'config.js', 'protocol.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(folder, 'session.js'), implementation);
   const reservation = createServer();
@@ -206,12 +206,13 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
       if (args[2] === 'shell' && args[3] === 'rm') return 'rm';
       return '';
     }
-    export async function runChecked(file, args) {
-      state.calls.push({file,args});
+    export async function runChecked(file, args, options) {
+      state.calls.push({file,args,options});
       ${logLine}
       const kind = kindOf(file, args);
       ${gate}
       if (file === 'pwsh') return {stdout:state.discovery};
+      if (args.includes('dumpsys')) return {stdout:state.lockDump ?? ''};
       if (args[0] === 'forward' && args[1] === '--list') return {stdout:state.forward};
       const transport = args[1];
       if (args[2] === 'push') return {stdout:''};
@@ -251,7 +252,7 @@ async function sessionFixture(t, { vendor = false } = {}) {
   const root = await mkdtemp(join(base, 'cleanup-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['session.js', 'protocol.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  for (const name of ['session.js', 'protocol.js', 'lock-state.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
   await writeFile(join(folder, 'config.js'), `export const config = { adb:'SYNTHETIC_ADB', deviceSerial:'SYNTHETICPHONE' };`);
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule());
   if (vendor) await installVendor(root);
@@ -278,7 +279,7 @@ async function startupBridge(t) {
   const root = await mkdtemp(join(base, 'startup-cancel-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js']) {
+  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js']) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule({
@@ -559,4 +560,37 @@ test('replacement connect cannot start device work before cancelled startup and 
   await until(async () => (await bridge.commands()).filter(call => commandStage(call) === 'push').length === 2);
   assert.deepEqual((await bridge.commands()).map(commandStage), ['discovery', 'identity', 'push', 'identity', 'rm', 'discovery', 'identity', 'push']);
   assert.equal((await bridge.commands()).some(call => commandStage(call) === 'allocate'), false);
+});
+
+test('lock subscription is strictly typed, stays read-only and does not require a connected session', async t => {
+  const bridge = await fixture(t, 'export class ScrcpySession {}');
+  for (const value of [
+    { type: 'lockSubscription', enabled: 'true', visible: true },
+    { type: 'lockSubscription', enabled: true },
+    { type: 'lockSubscription', enabled: true, visible: true, command: 'SYNTHETIC_PRIVATE' },
+  ]) bridge.sendRaw(JSON.stringify(value));
+  await until(() => bridge.messages.filter(value => value.type === 'inputError').length === 3);
+  assert.ok(bridge.messages.filter(value => value.type === 'inputError').every(value => value.message === 'Invalid lock-state subscription.'));
+  bridge.sendRaw(JSON.stringify({ type: 'lockSubscription', enabled: true, visible: true }));
+  await until(() => bridge.messages.some(value => value.type === 'lockState'));
+  assert.deepEqual(bridge.messages.filter(value => value.type === 'lockState'), [{ type: 'lockState', state: 'unknown', suspended: false }]);
+  assert.equal((await bridge.status()).state, 'idle');
+  assert.doesNotMatch(JSON.stringify(bridge.messages), /SYNTHETIC_PRIVATE/);
+});
+
+test('lock reads use only the verified session transport and bounded cancellable command', async t => {
+  const { session, state } = await sessionFixture(t);
+  const controller = new AbortController();
+  assert.equal(await session.readLockState(controller.signal), 'unknown');
+  assert.deepEqual(state.calls, []);
+  session.transport = 'VERIFIED_SESSION_TRANSPORT';
+  session.control = { destroyed: false };
+  state.lockDump = '  KeyguardServiceDelegate\n    showing=true\n    occluded=false\n    screenState=SCREEN_STATE_ON\n    interactiveState=INTERACTIVE_STATE_AWAKE\n';
+  assert.equal(await session.readLockState(controller.signal), 'locked-awake');
+  assert.equal(state.calls.length, 1);
+  assert.deepEqual(state.calls[0].args, ['-s', 'VERIFIED_SESSION_TRANSPORT', 'shell', 'dumpsys', 'window', 'policy']);
+  assert.deepEqual(state.calls[0].options, { timeoutMs: 1000, maxOutputBytes: 64 * 1024, signal: controller.signal });
+  session.closed = true;
+  assert.equal(await session.readLockState(controller.signal), 'unknown');
+  assert.equal(state.calls.length, 1);
 });
