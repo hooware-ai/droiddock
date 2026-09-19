@@ -37,7 +37,7 @@ The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dy
 | `scripts/launch.mjs` | Detached service launch/reuse. |
 | `scripts/phone.mjs` | Narrow open/status/disconnect helper for local integrations. |
 | `scripts/*.ps1` | Windows bootstrap, discovery, and entry points. |
-| `scripts/Test-DroidDock.mjs` | Baseline and opt-in live diagnostics. |
+| `scripts/Test-DroidDock.mjs` | Baseline and opt-in live diagnostics, plus an explicit allowlisted support-summary Markdown formatter. |
 | `droiddock/tests/` | Offline protocol, boundary, ownership, setup, lifecycle, diagnostic, keyboard/focus, fullscreen, and startup-progress tests. |
 
 ## Ownership and lifecycle

@@ -254,25 +254,130 @@ export async function diagnose({ root = projectRoot, env = process.env, live = f
   }
   if (live) {
     if (checks.every(item => item.ok)) await check('live', () => verifyLive({ root, config, env }));
-    else checks.push({ name: 'live', ok: false, message: 'Live verification skipped until baseline checks pass.' });
+    else checks.push({ name: 'live', ok: false, message: LIVE_CHECK_SKIPPED });
   }
   return { app: 'DroidDock', diagnosticVersion: 1, ok: checks.every(item => item.ok), liveRequested: live, checks };
 }
 
+const LIVE_CHECK_SKIPPED = 'Live verification skipped until baseline checks pass.';
+const SUPPORT_SUMMARY_CHECKS = ['node', 'configuration', 'vendor', 'build', 'adb', 'powershell', 'device', 'live'];
+const SUPPORT_SUMMARY_MAX_CHARS = 4096;
+const CLI_FLAGS = ['--live', '--json', '--support-summary', '--help'];
+const CLI_USAGE = 'Usage: node scripts/Test-DroidDock.mjs [--live] [--json] [--support-summary] [--help]';
+
+function supportCheck(report, name) {
+  return Array.isArray(report?.checks) ? report.checks.find(item => item && item.name === name) : undefined;
+}
+
+function supportOutcome(report, name) {
+  const item = supportCheck(report, name);
+  if (name === 'live') {
+    if (report?.liveRequested !== true) return 'not requested';
+    if (!item) return 'skipped';
+    if (item.ok === true) return 'passed';
+    return item.message === LIVE_CHECK_SKIPPED ? 'skipped' : 'failed';
+  }
+  if (item) return item.ok === true ? 'passed' : 'failed';
+  return 'skipped';
+}
+
+function supportVersion(value) {
+  return typeof value === 'string' && /^\d+(?:\.\d+)*$/.test(value) ? value : undefined;
+}
+
+function supportDetails(name, item, outcome) {
+  if (name === 'live') {
+    const notes = [];
+    if (outcome === 'not requested') notes.push('pass --live to request packet checks');
+    else if (outcome === 'skipped') notes.push('skipped until baseline checks pass');
+    else if (outcome === 'passed' && item) {
+      if (item.mode === 'existing-session') notes.push('existing-session packet counters observed');
+      else if (item.mode === 'temporary-session') notes.push('temporary-session stream packets observed');
+      if (Number.isSafeInteger(item.packetsAdvanced) && item.packetsAdvanced > 0) notes.push('packet counters advanced');
+      if (Number.isInteger(item.frames) && item.frames >= 0 && item.frames <= 1000000) notes.push(`${item.frames} frame packets`);
+      const video = item.video;
+      if (video && typeof video === 'object' && !Array.isArray(video)) {
+        if (video.codec === 'h264') notes.push('codec h264');
+        if (Number.isInteger(video.width) && Number.isInteger(video.height) && video.width >= 1 && video.height >= 1 && video.width <= 8192 && video.height <= 8192) {
+          notes.push(`${video.width}x${video.height}`);
+        }
+      }
+      if (item.contentSaved === false) notes.push('no screen content saved');
+      if (item.inputSent === false) notes.push('no input sent');
+    }
+    notes.push('not a rendered-video claim');
+    return notes.join('; ');
+  }
+  if (outcome !== 'passed' || !item) return '';
+  if (name === 'node' || name === 'adb') {
+    const version = supportVersion(item.version);
+    return version ? `version ${version}` : '';
+  }
+  if (name === 'vendor') {
+    const version = supportVersion(item.version);
+    return version ? `scrcpy ${version}` : '';
+  }
+  if (name === 'powershell' && Number.isInteger(item.major) && item.major >= 0 && item.major <= 99) return `major ${item.major}`;
+  if (name === 'device' && item.permanentIdentityVerified === true) return 'permanent identity verified';
+  if (name === 'configuration' && typeof item.localConfigPresent === 'boolean') return item.localConfigPresent ? 'local config present' : 'local config absent';
+  return '';
+}
+
+// Project only allowlisted schema/tool versions and named check outcomes.
+// Do not serialize the raw report or copy paths, serials, endpoints, ids, or exception strings.
+export function formatSupportSummary(report) {
+  const source = report && typeof report === 'object' && !Array.isArray(report) ? report : {};
+  const schema = Number.isInteger(source.diagnosticVersion) && source.diagnosticVersion >= 1 && source.diagnosticVersion <= 99
+    ? source.diagnosticVersion
+    : undefined;
+  const lines = [
+    '# DroidDock support summary',
+    '',
+    'Review this summary before sharing. DroidDock does not upload it or copy it to the clipboard.',
+    '',
+    '- App: DroidDock',
+    ...(schema !== undefined ? [`- Diagnostic schema: ${schema}`] : []),
+    `- Overall: ${source.ok === true ? 'passed' : 'failed'}`,
+    `- Live requested: ${source.liveRequested === true ? 'yes' : 'no'}`,
+    '',
+    '## Checks',
+    '',
+    '| Check | Outcome | Details |',
+    '| --- | --- | --- |',
+  ];
+  for (const name of SUPPORT_SUMMARY_CHECKS) {
+    const outcome = supportOutcome(source, name);
+    const details = supportDetails(name, supportCheck(source, name), outcome).replace(/\r?\n/g, ' ').replace(/\|/g, '/');
+    lines.push(`| ${name} | ${outcome} | ${details} |`);
+  }
+  lines.push('', 'Packet or stream evidence from the live check is not a rendered-video claim. Inspect the browser view separately.', '');
+  const markdown = lines.join('\n');
+  return markdown.length <= SUPPORT_SUMMARY_MAX_CHARS
+    ? markdown
+    : `${markdown.slice(0, SUPPORT_SUMMARY_MAX_CHARS - 24).trimEnd()}\n\n[summary truncated]\n`;
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  if (args.some(arg => !['--live', '--json', '--help'].includes(arg))) {
-    console.log(JSON.stringify({ app: 'DroidDock', ok: false, message: 'Usage: node scripts/Test-DroidDock.mjs [--live] [--json] [--help]' }));
+  if (args.some(arg => !CLI_FLAGS.includes(arg))) {
+    console.log(JSON.stringify({ app: 'DroidDock', ok: false, message: CLI_USAGE }));
     process.exitCode = 2;
   } else if (args.includes('--help')) {
-    console.log(JSON.stringify({ usage: 'node scripts/Test-DroidDock.mjs [--live] [--json]', exitCodes: { 0: 'All requested checks passed', 1: 'A diagnostic check failed', 2: 'Invalid arguments' }, live: 'Observe an existing active stream, or verify video in a temporary server and disconnect. No screen content is saved and no phone input is sent.' }, null, 2));
+    console.log(JSON.stringify({
+      usage: 'node scripts/Test-DroidDock.mjs [--live] [--json] [--support-summary]',
+      exitCodes: { 0: 'All requested checks passed', 1: 'A diagnostic check failed', 2: 'Invalid arguments' },
+      live: 'Observe an existing active stream, or verify video in a temporary server and disconnect. No screen content is saved and no phone input is sent.',
+      json: 'Print the existing JSON diagnostic report. This is the default when --support-summary is omitted.',
+      supportSummary: 'Print a compact allowlisted Markdown summary of the same diagnostic result. Review it before sharing. Nothing is uploaded or copied to the clipboard. Packet evidence is not a rendered-video claim.',
+    }, null, 2));
   } else {
     try {
       const report = await diagnose({ live: args.includes('--live') });
-      console.log(JSON.stringify(report, null, 2));
+      console.log(args.includes('--support-summary') ? formatSupportSummary(report) : JSON.stringify(report, null, 2));
       process.exitCode = report.ok ? 0 : 1;
     } catch {
-      console.log(JSON.stringify({ app: 'DroidDock', ok: false, message: 'Diagnostics could not complete. Verify the local installation and retry.' }));
+      const failure = { app: 'DroidDock', ok: false, message: 'Diagnostics could not complete. Verify the local installation and retry.' };
+      console.log(args.includes('--support-summary') ? formatSupportSummary(failure) : JSON.stringify(failure));
       process.exitCode = 1;
     }
   }

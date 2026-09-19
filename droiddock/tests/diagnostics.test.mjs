@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
-import { loadConfig, inspectVendor, videoEvidence, verifyLive, diagnose, runCommand } from '../../scripts/Test-DroidDock.mjs';
+import { loadConfig, inspectVendor, videoEvidence, verifyLive, diagnose, runCommand, formatSupportSummary } from '../../scripts/Test-DroidDock.mjs';
 
 const root = resolve('.');
 async function fixture(t) {
@@ -204,8 +204,250 @@ test('CLI returns parseable redacted JSON and stable usage/failure exit codes', 
   }
   assert.equal((await invoke(['--unknown'])).code, 2);
   assert.equal((await invoke(['--help'])).code, 0);
+  const help = await invoke(['--help']);
+  assert.match(help.report.usage, /--support-summary/);
+  assert.match(help.report.supportSummary, /Review it before sharing/);
+  assert.match(help.report.supportSummary, /not a rendered-video claim/);
   const invalid = await invoke(['--json'], { DROIDDOCK_DEVICE_SERIAL: 'PRIVATE INVALID SERIAL' });
   assert.equal(invalid.code, 1);
   assert.equal(invalid.report.ok, false);
   assert.doesNotMatch(JSON.stringify(invalid.report), /PRIVATE INVALID SERIAL/);
+});
+
+const supportSuccess = Object.freeze({
+  app: 'DroidDock',
+  diagnosticVersion: 1,
+  ok: true,
+  liveRequested: true,
+  checks: Object.freeze([
+    Object.freeze({ name: 'node', ok: true, version: '24.10.0' }),
+    Object.freeze({ name: 'configuration', ok: true, localConfigPresent: true, sources: Object.freeze({ deviceSerial: 'environment', deviceName: 'default', adb: 'config.local.json', port: 'default' }) }),
+    Object.freeze({ name: 'vendor', ok: true, version: '4.1', sha256: 'deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae' }),
+    Object.freeze({ name: 'build', ok: true }),
+    Object.freeze({ name: 'adb', ok: true, version: '1.0.41' }),
+    Object.freeze({ name: 'powershell', ok: true, major: 7 }),
+    Object.freeze({ name: 'device', ok: true, permanentIdentityVerified: true }),
+    Object.freeze({ name: 'live', ok: true, mode: 'temporary-session', video: Object.freeze({ codec: 'h264', width: 640, height: 1280 }), frames: 2, contentSaved: false, inputSent: false, cleanup: 'idle confirmed; temporary server stopped' }),
+  ]),
+});
+
+const supportSuccessMarkdown = `# DroidDock support summary
+
+Review this summary before sharing. DroidDock does not upload it or copy it to the clipboard.
+
+- App: DroidDock
+- Diagnostic schema: 1
+- Overall: passed
+- Live requested: yes
+
+## Checks
+
+| Check | Outcome | Details |
+| --- | --- | --- |
+| node | passed | version 24.10.0 |
+| configuration | passed | local config present |
+| vendor | passed | scrcpy 4.1 |
+| build | passed |  |
+| adb | passed | version 1.0.41 |
+| powershell | passed | major 7 |
+| device | passed | permanent identity verified |
+| live | passed | temporary-session stream packets observed; 2 frame packets; codec h264; 640x1280; no screen content saved; no input sent; not a rendered-video claim |
+
+Packet or stream evidence from the live check is not a rendered-video claim. Inspect the browser view separately.
+`;
+
+const supportFailed = Object.freeze({
+  app: 'DroidDock',
+  diagnosticVersion: 1,
+  ok: false,
+  liveRequested: true,
+  checks: Object.freeze([
+    Object.freeze({ name: 'node', ok: true, version: '24.10.0' }),
+    Object.freeze({ name: 'configuration', ok: false, message: 'Set deviceSerial in config.local.json or DROIDDOCK_DEVICE_SERIAL to the permanent ro.serialno value; see README.md.' }),
+    Object.freeze({ name: 'vendor', ok: true, version: '4.1' }),
+    Object.freeze({ name: 'build', ok: true }),
+    Object.freeze({ name: 'live', ok: false, message: 'Live verification skipped until baseline checks pass.' }),
+  ]),
+});
+
+const supportFailedMarkdown = `# DroidDock support summary
+
+Review this summary before sharing. DroidDock does not upload it or copy it to the clipboard.
+
+- App: DroidDock
+- Diagnostic schema: 1
+- Overall: failed
+- Live requested: yes
+
+## Checks
+
+| Check | Outcome | Details |
+| --- | --- | --- |
+| node | passed | version 24.10.0 |
+| configuration | failed |  |
+| vendor | passed | scrcpy 4.1 |
+| build | passed |  |
+| adb | skipped |  |
+| powershell | skipped |  |
+| device | skipped |  |
+| live | skipped | skipped until baseline checks pass; not a rendered-video claim |
+
+Packet or stream evidence from the live check is not a rendered-video claim. Inspect the browser view separately.
+`;
+
+test('support summary uses a stable allowlist and distinguishes check outcomes', () => {
+  assert.equal(formatSupportSummary(supportSuccess), supportSuccessMarkdown);
+  assert.equal(formatSupportSummary(supportFailed), supportFailedMarkdown);
+  const idle = formatSupportSummary({
+    app: 'DroidDock', diagnosticVersion: 1, ok: true, liveRequested: false,
+    checks: [
+      { name: 'node', ok: true, version: '24.10.0' },
+      { name: 'configuration', ok: true, localConfigPresent: false },
+      { name: 'vendor', ok: true, version: '4.1' },
+      { name: 'build', ok: true },
+      { name: 'adb', ok: true, version: '1.0.41' },
+      { name: 'powershell', ok: true, major: 7 },
+      { name: 'device', ok: true, permanentIdentityVerified: true },
+    ],
+  });
+  assert.match(idle, /\| configuration \| passed \| local config absent \|/);
+  assert.match(idle, /\| live \| not requested \| pass --live to request packet checks; not a rendered-video claim \|/);
+  assert.match(idle, /Live requested: no/);
+  const existing = formatSupportSummary({
+    ...supportSuccess,
+    checks: supportSuccess.checks.map(item => item.name === 'live'
+      ? { name: 'live', ok: true, mode: 'existing-session', packetsAdvanced: 4, observation: 'Read-only status counters; existing connection preserved.' }
+      : item),
+  });
+  assert.match(existing, /\| live \| passed \| existing-session packet counters observed; packet counters advanced; not a rendered-video claim \|/);
+  assert.doesNotMatch(existing, /rendered video(?! claim)/i);
+  assert.doesNotMatch(existing, /\bdisplayed\b|\bcanvas\b/i);
+  const liveFailed = formatSupportSummary({
+    ...supportSuccess,
+    ok: false,
+    checks: supportSuccess.checks.map(item => item.name === 'live'
+      ? { name: 'live', ok: false, message: 'Existing session did not show advancing video packets. It was left untouched; check the phone and reconnect in DroidDock.' }
+      : item),
+  });
+  assert.match(liveFailed, /\| live \| failed \| not a rendered-video claim \|/);
+  assert.doesNotMatch(liveFailed, /advancing video packets|untouched|reconnect/);
+});
+
+test('support summary drops private markers instead of redacting a raw report', () => {
+  const dirty = {
+    ...supportSuccess,
+    message: 'PRIVATE_MARKER exception at C:\\Users\\<user>\\droiddock',
+    installationId: 'deadbeefdeadbeef',
+    configurationId: 'cafebabecafebabe',
+    endpoint: 'http://127.0.0.1:3210/',
+    deviceSerial: 'SERIALABC123',
+    clipboard: 'CLIPBOARD_SECRET',
+    screenshot: 'SCREEN_CONTENT',
+    stderr: 'PRIVATE_OUTPUT '.repeat(4000),
+    checks: [
+      ...supportSuccess.checks.map(item => ({
+        ...item,
+        message: 'PRIVATE_MARKER raw subprocess PRIVATE_OUTPUT',
+        path: '/home/<user>/.android',
+        deviceSerial: 'SERIALABC123',
+        installationId: 'deadbeefdeadbeef',
+        configurationId: 'cafebabecafebabe',
+        stderr: 'PRIVATE_OUTPUT',
+        endpoint: 'ws://127.0.0.1:3210/stream',
+        clipboard: 'CLIPBOARD_SECRET',
+        screenshot: 'SCREEN_CONTENT',
+        video: item.video ? { ...item.video, screenshot: 'SCREEN_CONTENT' } : item.video,
+      })),
+      { name: 'shell', ok: true, message: 'SHOULD_NOT_APPEAR' },
+    ],
+  };
+  const markdown = formatSupportSummary(dirty);
+  assert.equal(markdown, supportSuccessMarkdown);
+  assert.doesNotMatch(markdown, /PRIVATE_MARKER|PRIVATE_OUTPUT|SERIALABC123|127\.0\.0\.1|deadbeef|cafebabe|CLIPBOARD_SECRET|SCREEN_CONTENT|SHOULD_NOT_APPEAR|ws:\/\//);
+  assert.ok(markdown.length <= 4096);
+});
+
+test('support summary formats existing results without rerunning checks and stays cheaper than diagnose', async () => {
+  let commands = 0;
+  const report = await diagnose({
+    root,
+    env: { DROIDDOCK_DEVICE_SERIAL: 'SYNTHETICPRIVATE', DROIDDOCK_ADB: 'FAKEADB' },
+    command: async (file, args) => {
+      commands++;
+      if (file === 'FAKEADB') return 'Android Debug Bridge version 1.0.41\nInstalled as PRIVATEPATH';
+      if (args.includes('-Command')) return '7';
+      if (args.some(arg => arg.endsWith('Start-DroidDockAdb.ps1'))) return '';
+      return 'PRIVATE_TRANSPORT';
+    },
+  });
+  const before = commands;
+  const snapshot = JSON.stringify(report);
+  const formatted = formatSupportSummary(report);
+  assert.equal(commands, before);
+  assert.equal(JSON.stringify(report), snapshot);
+  assert.match(formatted, /\| node \| passed \|/);
+  assert.match(formatted, /\| live \| not requested \|/);
+  assert.doesNotMatch(formatted, /SYNTHETICPRIVATE|PRIVATEPATH|PRIVATE_TRANSPORT|FAKEADB/);
+
+  const iterations = 1000;
+  const formatStarted = performance.now();
+  for (let i = 0; i < iterations; i++) formatSupportSummary(report);
+  const formatMs = (performance.now() - formatStarted) / iterations;
+  const diagnoseStarted = performance.now();
+  await diagnose({
+    root,
+    env: { DROIDDOCK_DEVICE_SERIAL: 'SYNTHETICPRIVATE', DROIDDOCK_ADB: 'FAKEADB' },
+    command: async (file, args) => {
+      if (file === 'FAKEADB') return 'Android Debug Bridge version 1.0.41';
+      if (args.includes('-Command')) return '7';
+      return '';
+    },
+  });
+  const diagnoseMs = performance.now() - diagnoseStarted;
+  assert.ok(formatMs < diagnoseMs, `support-summary format ${formatMs.toFixed(4)}ms vs diagnose ${diagnoseMs.toFixed(2)}ms`);
+  assert.ok(formatMs < 5, `support-summary format ${formatMs.toFixed(4)}ms exceeds 5ms bound`);
+});
+
+test('CLI --support-summary preserves JSON output and exit codes', async () => {
+  async function invokeText(args, env = {}) {
+    const child = spawn(process.execPath, ['scripts/Test-DroidDock.mjs', ...args], {
+      cwd: root, env: { ...process.env, ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    const [code] = await once(child, 'close');
+    assert.equal(stderr, '');
+    return { code, stdout };
+  }
+  const env = { DROIDDOCK_DEVICE_SERIAL: 'PRIVATE INVALID SERIAL' };
+  const jsonChild = spawn(process.execPath, ['scripts/Test-DroidDock.mjs', '--json'], {
+    cwd: root, env: { ...process.env, ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let jsonOut = '', jsonErr = '';
+  jsonChild.stdout.on('data', chunk => { jsonOut += chunk; });
+  jsonChild.stderr.on('data', chunk => { jsonErr += chunk; });
+  const [jsonCode] = await once(jsonChild, 'close');
+  assert.equal(jsonErr, '');
+  const jsonReport = JSON.parse(jsonOut);
+  assert.equal(jsonCode, 1);
+  assert.equal(jsonReport.app, 'DroidDock');
+  assert.equal(jsonReport.diagnosticVersion, 1);
+  assert.equal(jsonReport.ok, false);
+  assert.doesNotMatch(jsonOut, /PRIVATE INVALID SERIAL|# DroidDock support summary/);
+
+  const markdown = await invokeText(['--support-summary'], env);
+  assert.equal(markdown.code, jsonCode);
+  assert.match(markdown.stdout, /^# DroidDock support summary/m);
+  assert.match(markdown.stdout, /\| configuration \| failed \|/);
+  assert.match(markdown.stdout, /\| live \| not requested \|/);
+  assert.doesNotMatch(markdown.stdout, /PRIVATE INVALID SERIAL/);
+  assert.throws(() => JSON.parse(markdown.stdout));
+
+  const both = await invokeText(['--json', '--support-summary'], env);
+  assert.equal(both.code, jsonCode);
+  assert.match(both.stdout, /^# DroidDock support summary/m);
+  const leaked = await invokeText(['--support-summary'], { DROIDDOCK_DEVICE_SERIAL: 'SYNTHETIC1', DROIDDOCK_ADB: 'FAKEADB' });
+  assert.doesNotMatch(leaked.stdout, /SYNTHETIC1|FAKEADB/);
+  assert.match(leaked.stdout, /Review this summary before sharing/);
 });

@@ -91,11 +91,12 @@ For installation/device diagnostics on the supported Windows host:
 ```powershell
 node scripts/Test-DroidDock.mjs
 node scripts/Test-DroidDock.mjs --live
+node scripts/Test-DroidDock.mjs --support-summary
 ```
 
-The baseline checks configuration, dependencies, build artifacts, vendor integrity, and phone reachability without starting video. `--live` adds packet verification. When idle, it uses a temporary service and phone session and cleans them up. When an active session exists, it observes advancing packet counters without taking control from the browser.
+The baseline checks configuration, dependencies, build artifacts, vendor integrity, and phone reachability without starting video. `--live` adds packet verification. When idle, it uses a temporary service and phone session and cleans them up. When an active session exists, it observes advancing packet counters without taking control from the browser. Live checks stay opt-in; adding `--support-summary` only formats the same result and does not start extra device actions.
 
-The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for pass, 1 for failed checks, 2 for invalid arguments. These codes differ from the installer's `needs_action` result. Review output before sharing it, even when individual checks redact identities.
+The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for pass, 1 for failed checks, 2 for invalid arguments. These codes differ from the installer's `needs_action` result. `--json` keeps that JSON report. `--support-summary` prints a compact Markdown subset from an explicit allowlist: diagnostic schema/tool versions and named check outcomes (`passed`, `failed`, `skipped`, or `not requested`). It does not serialize leftover paths, serials, endpoints, installation or configuration identifiers, clipboard or screen content, raw subprocess output, or exception strings. Review the summary before sharing; the command does not upload it or copy it to the clipboard.
 
 **Packet checks do not prove browser rendering.** Open the returned URL, select Connect, and inspect actual phone video. Use harmless navigation to check input only when authorized. Do not send a message, buy something, or change a sensitive setting as a test. Report offline checks, device connectivity, and rendered video separately. A disconnected phone leaves live setup incomplete even if all offline tests pass.
 

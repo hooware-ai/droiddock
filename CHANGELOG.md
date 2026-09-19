@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors. This document 
 
 ## Unreleased
 
+- Optional `--support-summary` Markdown output for `scripts/Test-DroidDock.mjs`: a compact allowlisted report of diagnostic schema/tool versions and named check outcomes. Users review it before sharing; nothing is uploaded or copied to the clipboard. Packet or stream evidence is not treated as rendered video. Default JSON output and exit codes are unchanged.
 - In-app Help panel on the side rail documenting current keyboard, pointer, paste, and fallback-text behavior, including focus requirements, Escape/Back, and byte limits. Help is static, usable while disconnected, restores focus to its trigger, and does not send phone input.
 - Manual, masked phone PIN entry using standard Android digit key events, with separate Backspace and Enter controls, no automatic submission or retry, and clearing on send, panel closure, focus loss and session loss. Protected-screen visibility and remote biometric authentication remain unsupported.
 
