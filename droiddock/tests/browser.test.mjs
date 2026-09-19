@@ -26,7 +26,7 @@ test('browser retries after an old error snapshot but displays a current connect
   }
   class Observer { observe() {} }
   runInNewContext(readFileSync(new URL('../public/app.js', import.meta.url), 'utf8'), {
-    document: { getElementById: element, querySelectorAll: () => [], addEventListener() {} },
+    document: { hasFocus: () => true, getElementById: element, querySelectorAll: () => [], addEventListener() {} },
     window: { addEventListener() {} }, location: { protocol: 'http:', host: '127.0.0.1:3210' },
     WebSocket: FakeWebSocket, VideoDecoder: class {}, EncodedVideoChunk: class {},
     MutationObserver: Observer, ResizeObserver: Observer,

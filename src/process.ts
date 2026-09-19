@@ -15,6 +15,7 @@ export interface RunOptions {
   input?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  signal?: AbortSignal;
 }
 
 export class CommandError extends Error {
@@ -32,6 +33,7 @@ export class CommandError extends Error {
 export function runCommand(command: string, args: string[], options: RunOptions = {}): Promise<CommandResult> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) { reject(new Error("A required local command was cancelled.")); return; }
     let child;
     try {
       child = spawn(command, args, {
@@ -48,6 +50,7 @@ export function runCommand(command: string, args: string[], options: RunOptions 
       if (settled) return;
       settled = true;
       clearTimeout(timer); clearTimeout(escalation);
+      options.signal?.removeEventListener("abort", cancel);
       if (failure) reject(failure);
       else resolve({ command, args, code: child.exitCode, stdout, stderr, durationMs: Date.now() - started });
     };
@@ -64,6 +67,8 @@ export function runCommand(command: string, args: string[], options: RunOptions 
       }, 250);
     };
     const timer = setTimeout(() => fail("A required local command timed out. Check the phone connection and try again."), timeoutMs);
+    const cancel = () => fail("A required local command was cancelled.");
+    options.signal?.addEventListener("abort", cancel, { once: true });
     const collect = (chunk: string, target: "stdout" | "stderr") => {
       if (failure) return;
       outputBytes += Buffer.byteLength(chunk);

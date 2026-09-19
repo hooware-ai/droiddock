@@ -72,3 +72,13 @@ Never silently select whichever scrcpy server happens to be installed on the hos
 ## Evidence boundaries
 
 Offline tests use synthetic protocol data, local HTTP/WebSocket interactions, and injected/mocked device dependencies. They establish the tested behaviors, not real phone/browser compatibility. Live diagnostics establish metadata/frame-packet evidence; actual rendered video needs browser inspection. Report those layers separately when validating a change. [COMPATIBILITY.md](COMPATIBILITY.md) is the published record of those layers.
+
+## Optional phone lock detection
+
+A browser-owned `lockSubscription` message carries boolean `enabled` and `visible` fields. Only the current controlling WebSocket can subscribe. The bridge publishes `lockState` changes (`locked-awake`, `unlocked`, `other`, or `unknown`) and a `suspended` flag. These messages are separate from phone-control encoding and the video decode/render path.
+
+The session probes `dumpsys window policy` through its already identity-verified ADB transport. Only recognized keyguard showing/occlusion and screen/interactive state fields are interpreted. Missing, contradictory, or unsupported output yields unknown; raw diagnostics are neither logged nor sent to the browser. This format is not a stable Android API or a PIN-keypad detector. No device-specific branches, image analysis, companion app, or scrcpy changes are used.
+
+Probes run immediately on activation and at most once every two seconds, with one request in flight, a one-second timeout and 64-KiB combined output bound. Disabling, hiding, losing browser focus, disconnecting or handing off cancels active work; generation checks reject stale completions. Failures clear detection and back off ten seconds; three consecutive failures suspend detection until reconnect or a deliberate preference toggle. Visibility changes do not reset the failure budget.
+
+The browser stores only the opt-in boolean under installation/configuration identifiers. No PIN enters storage. Automatic opening never takes keyboard focus. Closing suppresses further openings in that lock session; only observed unlock or a new connection rearms it. Manual opening remains available with the existing control readiness gates. Escape closes the panel without sending Android Back.

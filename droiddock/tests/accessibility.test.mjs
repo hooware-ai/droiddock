@@ -42,12 +42,18 @@ function keyEvent(key, extras = {}) {
   };
 }
 
+function addListener(handlers, name, handler) {
+  const previous = handlers[name];
+  handlers[name] = previous ? (...args) => { previous(...args); return handler(...args); } : handler;
+}
+
 function makeElement(extra = {}) {
   const attrs = {};
   const classes = new Set();
   return {
     dataset: {}, style: {}, handlers: {}, textContent: '', hidden: false, disabled: false,
-    width: 0, height: 0, title: '', value: '', focused: false,
+    width: 0, height: 0, title: '', value: '', focused: false, checked: false,
+    contains(node) { return node === this; },
     classList: {
       toggle(name, force) {
         if (force === undefined) classes.has(name) ? classes.delete(name) : classes.add(name);
@@ -58,7 +64,7 @@ function makeElement(extra = {}) {
       remove(name) { classes.delete(name); },
       contains(name) { return classes.has(name); },
     },
-    addEventListener(name, handler) { this.handlers[name] = handler; },
+    addEventListener(name, handler) { addListener(this.handlers, name, handler); },
     setAttribute(name, value) { attrs[name] = String(value); },
     getAttribute(name) { return attrs[name]; },
     getContext() { return { clearRect() {}, drawImage() {} }; },
@@ -71,11 +77,12 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser() {
+function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
   const elements = new Map();
   const documentHandlers = {};
   const windowHandlers = {};
-  const documentState = { hidden: false };
+  const documentState = { hidden, focused };
+  const requests = [];
   const keyButtons = ['back', 'home', 'recents', 'volumeDown', 'volumeUp', 'power'].map((key) => makeElement({ dataset: { key }, disabled: true }));
   const summary = makeElement();
   const more = makeElement({
@@ -89,8 +96,11 @@ function loadBrowser() {
     if (id === 'more-controls') return more;
     if (!elements.has(id)) {
       elements.set(id, makeElement({
-        hidden: id === 'screen',
-        disabled: id === 'text-input' || id === 'send-text',
+        hidden: 'hidden' in tagById(id).attrs,
+        disabled: 'disabled' in tagById(id).attrs,
+        contains(node) {
+          return node === this || (id === 'pin-controls' && ['pin-input', 'pin-form', 'send-pin', 'pin-backspace', 'pin-enter', 'close-pin', 'auto-pin'].some(child => node === element(child)));
+        },
       }));
     }
     return elements.get(id);
@@ -124,11 +134,13 @@ function loadBrowser() {
     document: Object.assign(documentState, {
       getElementById: element,
       querySelectorAll: (sel) => sel === '[data-key]' ? keyButtons : [],
-      addEventListener(name, handler) { documentHandlers[name] = handler; },
+      addEventListener(name, handler) { addListener(documentHandlers, name, handler); },
+      hasFocus: () => documentState.focused,
       fullscreenEnabled: false,
       fullscreenElement: null,
     }),
-    window: { addEventListener(name, handler) { windowHandlers[name] = handler; } },
+    window: { addEventListener(name, handler) { addListener(windowHandlers, name, handler); } },
+    localStorage,
     location: { protocol: 'http:', host: '127.0.0.1:3210' },
     WebSocket: FakeWebSocket,
     VideoDecoder: FakeVideoDecoder,
@@ -137,13 +149,15 @@ function loadBrowser() {
     ResizeObserver: Observer,
     setTimeout: () => 1,
     clearTimeout() {},
-    fetch: () => new Promise(() => {}),
+    fetch: (url) => { requests.push(url); return new Promise(() => {}); },
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
     TextEncoder,
     ArrayBuffer,
     Uint8Array,
     DataView,
   });
-  return { element, keyButtons, summary, more, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder };
+  return { element, keyButtons, summary, more, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests };
 }
 
 function dispatchKey(browser, target, event) {
@@ -164,7 +178,7 @@ function configPacket() {
 
 async function startConnect(browser) {
   await browser.element('connect').handlers.click();
-  return browser.sockets[0];
+  return browser.sockets.at(-1);
 }
 
 function deliverSyntheticFrame(browser, socket) {
@@ -175,7 +189,7 @@ function deliverSyntheticFrame(browser, socket) {
   return socket;
 }
 
-export { loadBrowser, startConnect, deliverSyntheticFrame };
+export { loadBrowser, startConnect, deliverSyntheticFrame, dispatchKey, keyEvent };
 
 test('browser chrome exposes names, a live status, and natural tab order on the synthetic screen', () => {
   assert.match(html, /<html lang="en">/);

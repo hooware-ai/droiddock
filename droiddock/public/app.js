@@ -16,6 +16,14 @@
   let state = 'idle';
   let pinControlsDisabled = null;
   let hasFrame = false;
+  let preferenceKey = null;
+  const sessionPreferences = new Map();
+  let autoPin = false;
+  let lockState = 'unknown';
+  let lockSuspended = false;
+  let lockShown = false;
+  let lockSubscription = '';
+  let browserFocused = document.hasFocus();
   let pointer = null;
   let pendingMove = null;
   let moveAnimation = 0;
@@ -53,6 +61,8 @@
     // Empty-state copy is the connecting live region. Avoid a second announcement from the details panel.
     $('message').setAttribute('aria-live', hasFrame ? 'polite' : 'off');
     updateControls();
+    if (next !== 'connected') closePin(false);
+    syncLockSubscription();
     if (!hasFrame) {
       const title = next === 'connecting' || next === 'connected' ? 'Connecting to your phone…' : next === 'moved' ? 'Phone opened elsewhere.' : next === 'error' ? 'The phone is unavailable.' : 'Your phone, within reach.';
       const empty = message || (next === 'connecting' || next === 'connected' ? 'Waiting for the live screen.' : 'Connect to see and control your Android phone here.');
@@ -98,7 +108,77 @@
   }
 
   function pinReady() {
-    return $('more-controls').open && $('pin-controls').open && canControl();
+    return !$('pin-controls').hidden && !document.hidden && browserFocused && canControl();
+  }
+
+
+  function closePin(dismiss = false, restoreFocus = false) {
+    const wasOpen = !$('pin-controls').hidden;
+    if (dismiss && wasOpen) lockShown = true;
+    $('pin-controls').hidden = true;
+    $('pin-toggle').setAttribute('aria-expanded', 'false');
+    clearPin();
+    if (wasOpen && restoreFocus) $('pin-toggle').focus({ preventScroll: true });
+    return wasOpen;
+  }
+
+  function openPin(manual = false) {
+    if (document.hidden || !browserFocused) return;
+    $('more-controls').open = false;
+    $('pin-controls').hidden = false;
+    $('pin-toggle').setAttribute('aria-expanded', 'true');
+    if (lockState === 'locked-awake') lockShown = true;
+    // Automatic opening announces the aid but leaves keyboard focus alone.
+    if (manual && canControl()) $('pin-input').focus({ preventScroll: true });
+  }
+
+  function bindPinPreference(status) {
+    if (!/^[a-f0-9]{16}$/.test(status.installationId || '') || !/^[a-f0-9]{16}$/.test(status.configurationId || '')) return;
+    const key = `droiddock.auto-pin.${status.installationId}.${status.configurationId}`;
+    if (key === preferenceKey) return;
+    preferenceKey = key;
+    if (!sessionPreferences.has(key)) {
+      let saved = false;
+      try { saved = localStorage.getItem(key) === 'true'; } catch { /* Session-only preference when storage is unavailable. */ }
+      sessionPreferences.set(key, saved);
+    }
+    autoPin = sessionPreferences.get(key);
+    $('auto-pin').checked = autoPin;
+    lockShown = false;
+    syncLockSubscription();
+  }
+
+  function syncLockSubscription() {
+    const visible = !document.hidden && browserFocused;
+    const enabled = autoPin && state === 'connected';
+    const subscription = JSON.stringify({ type: 'lockSubscription', enabled, visible });
+    if (socket?.readyState === WebSocket.OPEN && subscription !== lockSubscription) {
+      socket.send(subscription);
+      lockSubscription = subscription;
+    }
+    if (!enabled || !visible) {
+      lockState = 'unknown';
+      closePin(false);
+    }
+    showLockStatus();
+  }
+
+  function showLockStatus() {
+    assignText($('lock-status'), !autoPin ? 'Automatic detection is off. Manual entry is available.'
+      : lockSuspended ? 'Automatic detection paused after repeated failures. Reconnect or turn the option off and on. Manual entry is available.'
+      : lockState === 'locked-awake' ? 'Phone lock screen detected. Make sure its PIN field is ready before sending.'
+      : lockState === 'unknown' ? 'Lock state is unavailable. Manual entry is available.'
+      : 'Waiting for the phone’s awake lock screen.');
+  }
+
+  function receiveLockState(message) {
+    if (!autoPin || state !== 'connected' || document.hidden || !browserFocused) return;
+    lockState = ['locked-awake', 'unlocked', 'other', 'unknown'].includes(message.state) ? message.state : 'unknown';
+    lockSuspended = message.suspended === true;
+    if (lockState === 'unlocked') lockShown = false;
+    if (lockState !== 'locked-awake') closePin(false);
+    else if (!lockShown && browserFocused) { lockShown = true; openPin(); }
+    showLockStatus();
   }
 
   function fitScreen() {
@@ -142,6 +222,8 @@
   }
 
   function holdEscapeFromSendingBack(event) {
+    if (event.defaultPrevented) return true;
+    if (closePin(true, true)) { event.preventDefault(); return true; }
     if (closeMoreControls()) {
       event.preventDefault();
       return true;
@@ -202,6 +284,8 @@
       return;
     }
     const currentGeneration = ++generation;
+    lockShown = false; lockState = 'unknown'; lockSuspended = false; lockSubscription = '';
+    closePin(false);
     clearScreen();
     setState('connecting');
     $('device').textContent = 'Connecting to phone';
@@ -212,7 +296,7 @@
       if (socket === ws && !hasFrame) fail('No video arrived. Check that your phone is connected and unlocked, then connect again.');
     }, 30000);
     ws.onopen = () => {
-      if (socket === ws && currentGeneration === generation) ws.send(JSON.stringify({ type: 'connect' }));
+      if (socket === ws && currentGeneration === generation) { ws.send(JSON.stringify({ type: 'connect' })); syncLockSubscription(); }
       else ws.close();
     };
     ws.onmessage = (event) => {
@@ -228,7 +312,10 @@
             clearScreen();
             setState('moved', 'Select Connect to bring your phone back here.');
             return;
+          } else if (message.type === 'lockState') {
+            receiveLockState(message);
           } else if (message.type === 'status') {
+            bindPinPreference(message);
             if (message.device) $('device').textContent = typeof message.device === 'string' ? message.device : message.device.name || message.device.model || message.device.serial || 'Android phone';
             // The greeting describes the previous attempt, including a retained
             // cleanup error. Wait for this socket's connect result before failing.
@@ -481,14 +568,27 @@
   for (const event of ['paste', 'copy', 'cut', 'drop']) {
     $('pin-input').addEventListener(event, (e) => e.preventDefault());
   }
-  for (const id of ['more-controls', 'pin-controls']) {
-    $(id).addEventListener('toggle', () => { if (!$(id).open) clearPin(); });
-  }
-  window.addEventListener('blur', clearPin);
-  window.addEventListener('pagehide', clearPin);
+  $('pin-toggle').addEventListener('click', () => {
+    if (!closePin(true)) openPin(true);
+  });
+  $('close-pin').addEventListener('click', () => closePin(true, true));
+  $('auto-pin').addEventListener('change', () => {
+    autoPin = $('auto-pin').checked;
+    lockSuspended = false;
+    if (preferenceKey) {
+      sessionPreferences.set(preferenceKey, autoPin);
+      try { localStorage.setItem(preferenceKey, String(autoPin)); } catch { /* Keep this session's choice. */ }
+    }
+    syncLockSubscription();
+  });
+  $('more-controls').addEventListener('toggle', () => { if ($('more-controls').open) closePin(true); });
+  window.addEventListener('blur', () => { browserFocused = false; closePin(false); syncLockSubscription(); });
+  window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
+  window.addEventListener('pagehide', () => { closePin(false); disconnect(); });
   $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
   document.addEventListener('pointerdown', (event) => {
-    if (!$('more-controls').contains(event.target)) { $('more-controls').open = false; clearPin(); }
+    if (!$('more-controls').contains(event.target)) $('more-controls').open = false;
+    if (!$('pin-controls').contains(event.target) && !$('pin-toggle').contains(event.target)) closePin(true);
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -523,12 +623,16 @@
     if ($('message').classList.contains('error') && hasFrame) $('more-controls').open = true;
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { releasePointer(); clearPin(); } });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { releasePointer(); closePin(false); }
+    syncLockSubscription();
+  });
   fetch('/api/status').then((response) => {
     if (!response.ok) throw new Error();
     return response.json();
   }).then((status) => {
     if (socket || generation !== 0) return;
+    bindPinPreference(status);
     if (!available) setState('error', 'Live video needs WebCodecs. Open DroidDock in a current Chrome or Edge browser on localhost.');
     else if (status.state === 'error') setState('error', status.message || 'Check that your phone is connected through ADB, then connect.');
     else setState('idle', status.state === 'connected' || status.state === 'connecting' ? 'A phone session is available. Connect to open its screen.' : 'Phone must be connected through ADB.');

@@ -95,3 +95,7 @@ Notes: short sanitized detail. No serials, paths, addresses, or private screensh
 ```
 
 Failures that include a minimal sanitized reproduction belong in a [bug report](https://github.com/hooware-ai/droiddock/issues/new?template=bug_report.yml). Do not paste `config.local.json`, full environment output, or raw diagnostic logs.
+
+## Automatic unlock panel
+
+Automatic lock detection is opt-in and uses a conservative parser for Android window-policy diagnostics. It is not guaranteed across Android versions or manufacturers. Other manufacturers remain **unverified** until tested; unsupported output disables automatic assistance without removing manual PIN entry. Offline fixtures prove parser and popup behavior only. Live lock, biometric unlock, dismissal, reconnect, and comparable 60-second video measurements must be reported separately, without phone identifiers or screenshots containing private data.

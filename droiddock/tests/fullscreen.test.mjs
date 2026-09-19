@@ -119,7 +119,7 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
     if (id === 'fullscreen') return fullscreen;
     if (!elements.has(id)) {
       elements.set(id, makeElement({
-        hidden: false,
+        hidden: id === 'pin-controls',
         disabled: id === 'text-input' || id === 'send-text',
       }));
     }
@@ -156,6 +156,7 @@ function loadBrowser({ fullscreenEnabled = true, fullscreenMode = 'succeed' } = 
   }
   runInNewContext(appSource, {
     document: {
+      hasFocus: () => true,
       getElementById: element,
       querySelectorAll: (sel) => sel === '[data-key]' ? keyButtons : [],
       addEventListener(name, handler) { documentHandlers[name] = handler; },

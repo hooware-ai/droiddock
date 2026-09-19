@@ -37,15 +37,10 @@
         </div>
         <span class="control-divider" aria-hidden="true"></span>
         <button id="fullscreen" class="icon-button" type="button" hidden title="Enter fullscreen" aria-label="Enter fullscreen" aria-pressed="false"><svg class="fullscreen-enter" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><svg class="fullscreen-exit" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg><span id="fullscreen-label" class="sr-only">Enter fullscreen</span></button>
-        <details id="more-controls" class="more-controls">
-          <summary class="icon-button" aria-label="Details and text input" title="Details and text input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></summary>
-          <div class="details-panel">
-            <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
-            <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
-            <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
-            <details id="pin-controls" class="pin-controls">
-              <summary aria-label="Phone PIN entry">Phone PIN entry</summary>
-              <p id="pin-help" class="text-help">Open the PIN prompt on your phone first. Protected screens may stay black. Digits go to the focused phone field; some phones submit automatically. Unsupported prompts need the physical phone.</p>
+        <button id="pin-toggle" class="icon-button" type="button" aria-label="Phone PIN entry" title="Phone PIN entry" aria-expanded="false" aria-controls="pin-controls">PIN</button>
+            <section id="pin-controls" class="details-panel pin-controls" role="dialog" aria-labelledby="pin-title" aria-describedby="pin-help" hidden>
+              <div class="pin-heading"><strong id="pin-title">Phone unlock</strong><button id="close-pin" type="button" aria-label="Close PIN entry">Close</button></div>
+              <p id="pin-help" class="text-help">Make sure the phone’s PIN field is ready to accept digits first. Lock detection cannot identify the authentication method or the focused field. Protected screens may stay black. Digits go to the focused phone field; some phones submit automatically. Unsupported prompts need the physical phone.</p>
               <form id="pin-form" class="text-form" autocomplete="off">
                 <label for="pin-input">Phone PIN</label>
                 <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]{1,64}" maxlength="64" autocomplete="off" spellcheck="false" aria-describedby="pin-help pin-privacy" disabled>
@@ -56,8 +51,17 @@
                 <button id="pin-enter" type="button" aria-label="Enter on phone" disabled>Enter on phone</button>
               </div>
               <p id="pin-privacy" class="text-help">Type directly. No clipboard or saved PIN. Closing this panel or leaving this window clears the field. Sending digits does not send Enter.</p>
+              <label class="pin-preference"><input id="auto-pin" type="checkbox"> Automatically show PIN entry when my phone is locked</label>
+              <p id="lock-status" class="text-help" role="status" aria-live="polite">Automatic detection is off. Manual entry is available.</p>
               <p id="pin-status" class="message" role="status" aria-live="polite"></p>
-            </details>
+            </section>
+        <details id="more-controls" class="more-controls">
+          <summary class="icon-button" aria-label="Details and text input" title="Details and text input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></summary>
+          <div class="details-panel">
+            <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
+            <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
+            <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
+
             <p id="message" class="message" role="status" aria-live="polite">Phone must be connected through ADB.</p>
           </div>
         </details>

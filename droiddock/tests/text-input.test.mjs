@@ -24,8 +24,8 @@ function submitText(browser) {
   return event;
 }
 
-async function connectedBrowser() {
-  const browser = loadBrowser();
+async function connectedBrowser(options = {}) {
+  const browser = loadBrowser(options);
   const socket = deliverSyntheticFrame(browser, await startConnect(browser));
   return { browser, socket };
 }
@@ -54,7 +54,7 @@ test('fallback field associates static help with a silent UTF-8 byte counter', (
   assert.match(html, /id="message" class="message" role="status" aria-live="polite"/);
   assert.match(css, /\.text-byte-count\.over-limit\{/);
   assert.match(css, /font-weight:600/);
-  assert.doesNotMatch(appSource, /localStorage|sessionStorage/);
+  assert.doesNotMatch(appSource, /sessionStorage/);
   assert.doesNotMatch(appSource, /console\.(?:log|info|debug|warn|error)/);
 });
 
@@ -137,4 +137,17 @@ test('successful send resets the counter and disconnect preserves over-limit tex
   submitText(browser);
   assert.equal(socket.sent.length, sentBefore);
   assert.equal(browser.element('text-input').value, over);
+});
+
+
+test('fallback text drafts and submissions never write browser storage', async () => {
+  const writes = [];
+  const localStorage = { getItem: () => null, setItem(...args) { writes.push(args); } };
+  const { browser, socket } = await connectedBrowser({ localStorage });
+  setInput(browser, 'synthetic private draft');
+  submitText(browser);
+  assert.deepEqual(socket.sent.at(-1), { type: 'text', text: 'synthetic private draft' });
+  setInput(browser, 'another synthetic draft');
+  browser.windowHandlers.blur();
+  assert.deepEqual(writes, []);
 });

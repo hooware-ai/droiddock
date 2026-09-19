@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { runChecked } from "../process.js";
 import { config } from "./config.js";
+import { parseLockState, type LockState } from "./lock-state.js";
 import { VideoParser, SCRCPY_VERSION, SERVER_SHA256, encodeControl, type VideoEvent } from "./protocol.js";
 
 export const CONNECTION_PROGRESS = {
@@ -133,6 +134,15 @@ export class ScrcpySession {
       socket.once("data", ready); socket.once("error", fail); socket.once("close", ended);
       signal.addEventListener("abort", aborted, { once: true });
     });
+  }
+
+  async readLockState(signal: AbortSignal): Promise<LockState> {
+    if (this.closed || !this.transport || !this.control || this.control.destroyed) return "unknown";
+    const result = await runChecked(this.adb, ["-s", this.transport, "shell", "dumpsys", "window", "policy"], {
+      timeoutMs: 1000, maxOutputBytes: 64 * 1024, signal,
+    });
+    if (this.closed || signal.aborted) return "unknown";
+    return parseLockState(result.stdout);
   }
 
   input(value: unknown): void {
