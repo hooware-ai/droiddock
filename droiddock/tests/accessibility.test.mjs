@@ -178,7 +178,9 @@ function deliverSyntheticFrame(browser, socket) {
 export { loadBrowser, startConnect, deliverSyntheticFrame };
 
 test('browser chrome exposes names, a live status, and natural tab order on the synthetic screen', () => {
-  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<html lang="en" data-theme="system">/);
+  assert.match(html, /<fieldset id="theme-choice"/);
+  assert.match(html, /name="theme" value="system" checked/);
   assert.doesNotMatch(html, /tabindex="[1-9]/);
   const canvas = tagById('screen');
   assert.equal(canvas.attrs.tabindex, '0');
@@ -219,13 +221,18 @@ test('browser chrome exposes names, a live status, and natural tab order on the 
 });
 
 test('visible focus styles meet a 3:1 contrast ratio on the empty rail and dark screen', () => {
-  const slate = css.match(/--slate:(#[0-9a-fA-F]{6})/);
-  const canvasFocus = css.match(/canvas:focus-visible\{outline:2px solid (#[0-9a-fA-F]{6})/);
-  assert.ok(slate && canvasFocus);
+  const root = css.match(/:root\{[^}]+\}/);
+  const slate = root?.[0].match(/--slate:(#[0-9a-fA-F]{6})/);
+  const page = root?.[0].match(/--page:(#[0-9a-fA-F]{6})/);
+  const surface = root?.[0].match(/--surface:(#[0-9a-fA-F]{3,8})/);
+  const canvasFocus = root?.[0].match(/--canvas-focus:(#[0-9a-fA-F]{6})/);
+  assert.ok(slate && page && surface && canvasFocus);
   assert.match(css, /:focus-visible\{outline:3px solid var\(--slate\);outline-offset:2px\}/);
+  assert.match(css, /canvas:focus-visible\{outline:2px solid var\(--canvas-focus\)/);
   assert.doesNotMatch(css, /outline\s*:\s*none/);
-  assert.ok(contrast(slate[1], '#ffffff') >= 3, `rail focus ${slate[1]} on white`);
-  assert.ok(contrast(slate[1], '#f1f4f7') >= 3, `rail focus ${slate[1]} on page background`);
+  const surfaceHex = surface[1].length === 4 ? '#ffffff' : surface[1];
+  assert.ok(contrast(slate[1], surfaceHex) >= 3, `rail focus ${slate[1]} on ${surfaceHex}`);
+  assert.ok(contrast(slate[1], page[1]) >= 3, `rail focus ${slate[1]} on page background`);
   assert.ok(contrast(canvasFocus[1], '#000000') >= 3, `screen focus ${canvasFocus[1]} on black`);
   assert.doesNotMatch(css, /\.state\{[^}]*font-size:0/);
 });

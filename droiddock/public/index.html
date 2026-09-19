@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>DroidDock</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
@@ -42,6 +42,12 @@
           <div class="details-panel">
             <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
             <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
+            <fieldset id="theme-choice" class="theme-choice">
+              <legend>Appearance</legend>
+              <label><input id="theme-system" type="radio" name="theme" value="system" checked> System</label>
+              <label><input id="theme-light" type="radio" name="theme" value="light"> Light</label>
+              <label><input id="theme-dark" type="radio" name="theme" value="dark"> Dark</label>
+            </fieldset>
             <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
             <details id="pin-controls" class="pin-controls">
               <summary aria-label="Phone PIN entry">Phone PIN entry</summary>

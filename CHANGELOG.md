@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors. This document 
 
 ## Unreleased
 
+- System-aware appearance: System, Light, and Dark choices in Details, defaulting to System. Only that preference is stored locally. Chrome, Details, inputs, empty and error states, focus outlines, and the fullscreen background follow CSS theme tokens. Phone video pixels are not recolored or filtered. Theme changes and storage failures do not reconnect the phone or change input gating.
 - Manual, masked phone PIN entry using standard Android digit key events, with separate Backspace and Enter controls, no automatic submission or retry, and clearing on send, panel closure, focus loss and session loss. Protected-screen visibility and remote biometric authentication remain unsupported.
 
 - Connection progress reports the current startup stage (finding the phone, preparing the connection, opening the video stream) without percentages or time estimates. Messages stay sanitized, cancelled or replaced sessions cannot overwrite a newer status, and browser input stays gated until a frame renders.

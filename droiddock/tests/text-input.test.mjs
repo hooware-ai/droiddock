@@ -54,7 +54,10 @@ test('fallback field associates static help with a silent UTF-8 byte counter', (
   assert.match(html, /id="message" class="message" role="status" aria-live="polite"/);
   assert.match(css, /\.text-byte-count\.over-limit\{/);
   assert.match(css, /font-weight:600/);
-  assert.doesNotMatch(appSource, /localStorage|sessionStorage/);
+  assert.doesNotMatch(appSource, /sessionStorage/);
+  assert.match(appSource, /THEME_STORAGE_KEY = 'droiddock\.theme'/);
+  assert.doesNotMatch(appSource, /localStorage[\s\S]{0,80}(?:text-input|pin-input)/);
+  assert.doesNotMatch(appSource, /(?:text-input|pin-input)[\s\S]{0,80}localStorage/);
   assert.doesNotMatch(appSource, /console\.(?:log|info|debug|warn|error)/);
 });
 

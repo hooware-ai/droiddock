@@ -31,14 +31,14 @@ The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dy
 | `src/droiddock/server.ts` | Loopback HTTP assets, request validation, WebSocket ownership, session lifecycle, current-session progress, status. |
 | `src/droiddock/config.ts` | Local config and environment overrides. |
 | `src/process.ts` | Bounded subprocess execution. |
-| `droiddock/public/` | Browser UI, WebCodecs decoding, input events, styles. |
+| `droiddock/public/` | Browser UI, WebCodecs decoding, input events, chrome theme tokens, styles. |
 | `droiddock/vendor/scrcpy-4.1/` | Unmodified server, upstream license, and provenance/checksum manifest. |
 | `scripts/setup.mjs` | Installation preparation, config/device selection, service inspection. |
 | `scripts/launch.mjs` | Detached service launch/reuse. |
 | `scripts/phone.mjs` | Narrow open/status/disconnect helper for local integrations. |
 | `scripts/*.ps1` | Windows bootstrap, discovery, and entry points. |
 | `scripts/Test-DroidDock.mjs` | Baseline and opt-in live diagnostics. |
-| `droiddock/tests/` | Offline protocol, boundary, ownership, setup, lifecycle, diagnostic, keyboard/focus, fullscreen, and startup-progress tests. |
+| `droiddock/tests/` | Offline protocol, boundary, ownership, setup, lifecycle, diagnostic, keyboard/focus, fullscreen, theme, and startup-progress tests. |
 
 ## Ownership and lifecycle
 

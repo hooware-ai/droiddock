@@ -35,6 +35,51 @@
     node.textContent = text;
   }
 
+  const THEME_STORAGE_KEY = 'droiddock.theme';
+  const THEME_CHOICES = new Set(['system', 'light', 'dark']);
+
+  function normalizeTheme(value) {
+    return THEME_CHOICES.has(value) ? value : 'system';
+  }
+
+  function readStoredTheme() {
+    try {
+      return normalizeTheme(globalThis.localStorage?.getItem(THEME_STORAGE_KEY));
+    } catch {
+      return 'system';
+    }
+  }
+
+  function writeStoredTheme(value) {
+    try {
+      globalThis.localStorage?.setItem(THEME_STORAGE_KEY, value);
+    } catch {
+      // Preference stays in memory when storage is unavailable.
+    }
+  }
+
+  function themeInputs() {
+    try {
+      return [...(document.querySelectorAll?.('input[name="theme"]') ?? [])];
+    } catch {
+      return [];
+    }
+  }
+
+  function applyTheme(value) {
+    const theme = normalizeTheme(value);
+    const root = document.documentElement;
+    if (root?.dataset) root.dataset.theme = theme;
+    for (const input of themeInputs()) input.checked = input.value === theme;
+    return theme;
+  }
+
+  function onThemeChoice(event) {
+    const target = event?.target;
+    if (!target || target.name !== 'theme') return;
+    writeStoredTheme(applyTheme(target.value));
+  }
+
   function setState(next, message = '') {
     state = next;
     const labels = { idle: 'Disconnected', connecting: 'Connecting', connected: 'Connected', moved: 'Opened elsewhere', error: 'Connection error' };
@@ -449,6 +494,8 @@
   });
   $('text-input').addEventListener('input', updateTextByteCount);
   updateTextByteCount();
+  applyTheme(readStoredTheme());
+  $('theme-choice')?.addEventListener('change', onThemeChoice);
   $('pin-form').addEventListener('submit', (event) => {
     event.preventDefault();
     const digits = $('pin-input').value;
