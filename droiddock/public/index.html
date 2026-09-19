@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light">
     <title>DroidDock</title>
     <link rel="stylesheet" href="/styles.css">
+    <script src="/stream-stats.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -74,6 +75,12 @@
               <li>Limited to 300 UTF-8 bytes per send. A live N / 300 bytes counter uses the same check as Send.</li>
               <li>Over-limit text stays in the field so it can be shortened.</li>
             </ul>
+            <h3>Stream statistics</h3>
+            <ul>
+              <li>Details can show optional local stream statistics: media bytes received, decoded frames drawn, and decode queue length.</li>
+              <li>Those numbers stay in this tab and are not sent anywhere. They are not end-to-end latency and do not prove video is visible.</li>
+              <li>Configured encoder limits are listed separately from measured rates. A still phone screen may produce few frames.</li>
+            </ul>
             <button id="close-help" type="button" aria-label="Close help">Close</button>
           </div>
         </details>
@@ -82,6 +89,19 @@
           <div class="details-panel">
             <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
             <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
+            <div class="stream-stats">
+              <label class="stream-stats-toggle" for="stream-stats-enabled"><input id="stream-stats-enabled" type="checkbox"> Show local stream statistics</label>
+              <p id="stream-stats-help" class="text-help">Optional local measurements for this browser tab. They are not sent anywhere and do not include phone content. A still phone screen may produce few frames; that is not a failure.</p>
+              <div id="stream-stats-panel" hidden>
+                <p id="stream-stats-limits" class="text-help">Configured encoder limits (not measurements): max 1280 px, up to 60 fps, 6 Mbps H.264.</p>
+                <dl class="stream-stats-list">
+                  <div><dt>Media bytes received</dt><dd id="stream-stats-bytes">—</dd></div>
+                  <div><dt>Decoded frames drawn</dt><dd id="stream-stats-frames">—</dd></div>
+                  <div><dt>Decode queue length</dt><dd id="stream-stats-queue">—</dd></div>
+                </dl>
+                <p id="stream-stats-note" class="text-help">Rates are the last completed 1-second period of observed local events. The first second shows Collecting. Media bytes received is not frames per second. These numbers are not end-to-end latency.</p>
+              </div>
+            </div>
             <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
             <details id="pin-controls" class="pin-controls">
               <summary aria-label="Phone PIN entry">Phone PIN entry</summary>

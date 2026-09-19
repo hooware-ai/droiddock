@@ -6,7 +6,7 @@ For bugs, questions, and feature requests, use [GitHub issues](https://github.co
 
 ## Include useful, safe evidence
 
-Provide the repository revision or version, Windows/Node/browser versions, USB or wireless connection type, expected behavior, actual behavior, and minimal reproduction steps. State whether the failure is during installation, phone discovery, stream connection, video rendering, or input. Distinguish offline test results from live-device checks.
+Provide the repository revision or version, Windows/Node/browser versions, USB or wireless connection type, expected behavior, actual behavior, and minimal reproduction steps. State whether the failure is during installation, phone discovery, stream connection, video rendering, or input. Distinguish offline test results from live-device checks. If you used Details stream statistics, report the labeled local rates (media bytes received, decoded frames drawn, decode queue length) without treating them as rendered-video proof or end-to-end latency.
 
 **Do not post secrets or personal identifiers.** Exclude account names, email addresses, personal handles, device serials, local usernames, machine paths, network addresses, pairing codes, and private phone screenshots. Use generic placeholders such as `<device-serial>` and `<checkout>` where context is needed. Do not paste `config.local.json`, full environment output, or raw logs.
 

@@ -36,6 +36,7 @@ test('local HTTP and WebSocket boundary rejects foreign websites and a second co
     assert.equal((await fetch(`${origin}/api/shutdown`, { method: 'POST' })).status, 403);
     assert.equal((await fetch(`${origin}/api/connect`, { method: 'POST', headers: { 'X-DroidDock': '1' } })).status, 409);
     assert.equal((await fetch(`${origin}/package.json`)).status, 404);
+    assert.equal((await fetch(`${origin}/stream-stats.js`)).status, 200);
     const page = await fetch(origin);
     assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'self'/);
     assert.equal(page.headers.get('access-control-allow-origin'), null);

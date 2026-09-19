@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const statsSource = readFileSync(new URL('../public/stream-stats.js', import.meta.url), 'utf8');
 
 function attributes(source) {
   const attrs = {};
@@ -46,8 +47,8 @@ function makeElement(extra = {}) {
   const attrs = {};
   const classes = new Set();
   return {
-    dataset: {}, style: {}, handlers: {}, textContent: '', hidden: false, disabled: false,
-    width: 0, height: 0, title: '', value: '', focused: false,
+    dataset: {}, style: {}, handlers: {}, textContent: '', hidden: false, disabled: false, checked: false,
+    width: 0, height: 0, title: '', value: '', focused: false, drawCount: 0,
     classList: {
       toggle(name, force) {
         if (force === undefined) classes.has(name) ? classes.delete(name) : classes.add(name);
@@ -61,7 +62,12 @@ function makeElement(extra = {}) {
     addEventListener(name, handler) { this.handlers[name] = handler; },
     setAttribute(name, value) { attrs[name] = String(value); },
     getAttribute(name) { return attrs[name]; },
-    getContext() { return { clearRect() {}, drawImage() {} }; },
+    getContext() {
+      return {
+        clearRect() {},
+        drawImage: () => { this.drawCount += 1; },
+      };
+    },
     getBoundingClientRect() { return { width: 720, height: 1280, left: 0, top: 0 }; },
     focus() { this.focused = true; },
     hasPointerCapture() { return false; },
@@ -71,7 +77,7 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser() {
+function loadBrowser(options = {}) {
   const elements = new Map();
   const documentHandlers = {};
   const windowHandlers = {};
@@ -82,7 +88,7 @@ function loadBrowser() {
     open: false,
     querySelector(sel) { return sel === 'summary' ? summary : null; },
     contains(node) {
-      return node === more || node === summary || node === element('text-input') || node === element('send-text') || node === element('message') || node === element('text-byte-count') || node === element('text-input-help');
+      return node === more || node === summary || node === element('text-input') || node === element('send-text') || node === element('message') || node === element('text-byte-count') || node === element('text-input-help') || node === element('stream-stats-enabled') || node === element('stream-stats-panel') || node === element('stream-stats-bytes');
     },
   });
   const helpSummary = makeElement();
@@ -98,13 +104,16 @@ function loadBrowser() {
     if (id === 'help-controls') return help;
     if (!elements.has(id)) {
       elements.set(id, makeElement({
-        hidden: id === 'screen',
+        hidden: id === 'screen' || id === 'stream-stats-panel',
         disabled: id === 'text-input' || id === 'send-text',
       }));
     }
     return elements.get(id);
   }
-  for (const id of ['screen', 'connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'text-byte-count', 'text-input-help', 'screen-area', 'close-help', 'help-panel']) element(id);
+  for (const id of ['screen', 'connect', 'connect-label', 'state', 'message', 'empty', 'empty-title', 'empty-message', 'device', 'resolution', 'text-input', 'send-text', 'text-form', 'text-byte-count', 'text-input-help', 'screen-area', 'close-help', 'help-panel', 'stream-stats-enabled', 'stream-stats-panel', 'stream-stats-bytes', 'stream-stats-frames', 'stream-stats-queue']) element(id);
+  let clock = 0;
+  const intervals = new Map();
+  let nextInterval = 0;
   const sockets = [];
   class FakeWebSocket {
     static OPEN = 1;
@@ -129,7 +138,7 @@ function loadBrowser() {
     emit(frame = { displayWidth: 720, displayHeight: 1280, close() {} }) { this.output(frame); }
   }
   class Observer { observe() {} }
-  runInNewContext(appSource, {
+  const sandbox = {
     document: Object.assign(documentState, {
       getElementById: element,
       querySelectorAll: (sel) => sel === '[data-key]' ? keyButtons : [],
@@ -144,6 +153,13 @@ function loadBrowser() {
     EncodedVideoChunk: class { constructor(init) { Object.assign(this, init); } },
     MutationObserver: Observer,
     ResizeObserver: Observer,
+    performance: { now() { return clock; } },
+    setInterval(fn, ms) {
+      const id = ++nextInterval;
+      intervals.set(id, { fn, ms });
+      return id;
+    },
+    clearInterval(id) { intervals.delete(id); },
     setTimeout: () => 1,
     clearTimeout() {},
     fetch: () => new Promise(() => {}),
@@ -151,8 +167,15 @@ function loadBrowser() {
     ArrayBuffer,
     Uint8Array,
     DataView,
-  });
-  return { element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder };
+  };
+  sandbox.globalThis = sandbox;
+  runInNewContext(options.appSource || `${statsSource}\n${appSource}`, sandbox);
+  return {
+    element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, intervals,
+    setTime(value) { clock = value; },
+    advanceTime(ms) { clock += ms; },
+    tickIntervals() { for (const item of [...intervals.values()]) item.fn(); },
+  };
 }
 
 function dispatchKey(browser, target, event) {

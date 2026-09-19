@@ -25,6 +25,19 @@
   let suppressEscapeBack = false;
   let suppressEscapeTimer = 0;
   const available = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
+  const statsApi = typeof DroidDockStreamStats === 'undefined' ? null : DroidDockStreamStats;
+  const streamStats = statsApi
+    ? statsApi.createStreamStats({
+      now() {
+        if (typeof statsApi.now === 'function') return statsApi.now();
+        return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : 0;
+      },
+    })
+    : null;
+  let statsEnabled = false;
+  let statsTimer = 0;
+  let statsRefreshGeneration = -1;
+  const statsBlank = { bytes: '—', frames: '—', queue: '—' };
 
   function canControl() {
     return state === 'connected' && hasFrame && socket?.readyState === WebSocket.OPEN;
@@ -99,6 +112,59 @@
 
   function pinReady() {
     return $('more-controls').open && $('pin-controls').open && canControl();
+  }
+
+  function statsSessionActive() {
+    return Boolean(socket && (state === 'connecting' || state === 'connected'));
+  }
+
+  function statsCanRecord() {
+    return Boolean(statsEnabled && streamStats && !document.hidden && statsSessionActive());
+  }
+
+  function statsShouldRefresh() {
+    return Boolean(statsEnabled && streamStats && $('more-controls').open && !document.hidden && statsSessionActive());
+  }
+
+  function currentDecodeQueueLength() {
+    if (!decoder || decoder.state === 'closed') return null;
+    return decoder.decodeQueueSize;
+  }
+
+  function paintStreamStats(labels) {
+    assignText($('stream-stats-bytes'), labels.bytes);
+    assignText($('stream-stats-frames'), labels.frames);
+    assignText($('stream-stats-queue'), labels.queue);
+  }
+
+  function refreshStreamStats() {
+    if (!statsShouldRefresh() || statsRefreshGeneration !== generation || !socket) return;
+    paintStreamStats(statsApi.formatSnapshot(
+      streamStats.snapshot(),
+      currentDecodeQueueLength(),
+      statsSessionActive() ? 'active' : 'unavailable',
+    ));
+  }
+
+  function stopStreamStatsTimer() {
+    if (!statsTimer) return;
+    clearInterval(statsTimer);
+    statsTimer = 0;
+  }
+
+  function syncStreamStatsRefresh() {
+    if (statsShouldRefresh()) {
+      statsRefreshGeneration = generation;
+      refreshStreamStats();
+      if (!statsTimer) statsTimer = setInterval(refreshStreamStats, 1000);
+    } else {
+      stopStreamStatsTimer();
+    }
+  }
+
+  function resetStreamStatsDisplay() {
+    streamStats?.reset();
+    if (statsEnabled && $('more-controls').open && !document.hidden) paintStreamStats(statsBlank);
   }
 
   function fitScreen() {
@@ -178,6 +244,7 @@
     $('empty').hidden = false;
     $('resolution').textContent = '';
     context.clearRect(0, 0, canvas.width, canvas.height);
+    resetStreamStatsDisplay();
     updateControls();
   }
 
@@ -188,6 +255,7 @@
     oldSocket?.close();
     clearScreen();
     setState('error', message);
+    syncStreamStatsRefresh();
   }
 
   function send(payload) {
@@ -212,6 +280,7 @@
     $('device').textContent = 'Connecting to phone';
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/stream?takeover=1`);
     socket = ws;
+    syncStreamStatsRefresh();
     ws.binaryType = 'arraybuffer';
     connectionTimer = setTimeout(() => {
       if (socket === ws && !hasFrame) fail('No video arrived. Check that your phone is connected and unlocked, then connect again.');
@@ -232,6 +301,7 @@
             ws.close();
             clearScreen();
             setState('moved', 'Select Connect to bring your phone back here.');
+            syncStreamStatsRefresh();
             return;
           } else if (message.type === 'status') {
             if (message.device) $('device').textContent = typeof message.device === 'string' ? message.device : message.device.name || message.device.model || message.device.serial || 'Android phone';
@@ -273,6 +343,7 @@
     clearScreen();
     $('device').textContent = 'Phone disconnected';
     setState('idle');
+    syncStreamStatsRefresh();
     // Closing this socket releases only its own session. An old view never
     // sends a global HTTP disconnect that could affect a replacement view.
   }
@@ -310,6 +381,7 @@
             const changed = canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight;
             if (changed) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
             context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+            if (statsCanRecord()) streamStats.recordDrawnFrame();
             const firstFrame = !hasFrame;
             if (firstFrame || changed) {
               hasFrame = true;
@@ -331,6 +403,7 @@
       decoder.configure(decoderConfiguration);
       return;
     }
+    if (statsCanRecord()) streamStats.recordMediaBytes(size);
     if (!decoder || !codecBytes) return;
     if (decoder.decodeQueueSize > 8) {
       // Dropping interdependent frames can freeze the display until another IDR.
@@ -431,6 +504,7 @@
     panel.open = false;
     clearPin();
     panel.querySelector('summary').focus();
+    syncStreamStatsRefresh();
     return true;
   }
   canvas.addEventListener('keydown', (event) => {
@@ -497,12 +571,14 @@
     $(id).addEventListener('toggle', () => {
       if (!$(id).open) clearPin();
       if (id === 'more-controls' && $(id).open && $('help-controls').open) $('help-controls').open = false;
+      if (id === 'more-controls') syncStreamStatsRefresh();
     });
   }
   $('help-controls').addEventListener('toggle', () => {
     if ($('help-controls').open && $('more-controls').open) {
       $('more-controls').open = false;
       clearPin();
+      syncStreamStatsRefresh();
     }
   });
   $('close-help').addEventListener('click', (event) => {
@@ -513,7 +589,7 @@
   window.addEventListener('pagehide', clearPin);
   $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
   document.addEventListener('pointerdown', (event) => {
-    if (!$('more-controls').contains(event.target)) { $('more-controls').open = false; clearPin(); }
+    if (!$('more-controls').contains(event.target)) { $('more-controls').open = false; clearPin(); syncStreamStatsRefresh(); }
     const help = $('help-controls');
     if (help && typeof help.contains === 'function' && !help.contains(event.target)) help.open = false;
   });
@@ -550,7 +626,26 @@
     if ($('message').classList.contains('error') && hasFrame) $('more-controls').open = true;
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { releasePointer(); clearPin(); } });
+  const statsToggle = $('stream-stats-enabled');
+  if (statsToggle) {
+    statsToggle.addEventListener('change', () => {
+      statsEnabled = statsToggle.checked === true;
+      const panel = $('stream-stats-panel');
+      if (panel) panel.hidden = !statsEnabled;
+      if (streamStats) streamStats.reset();
+      paintStreamStats(statsBlank);
+      if (!statsEnabled) stopStreamStatsTimer();
+      syncStreamStatsRefresh();
+    });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      releasePointer();
+      clearPin();
+      resetStreamStatsDisplay();
+    }
+    syncStreamStatsRefresh();
+  });
   fetch('/api/status').then((response) => {
     if (!response.ok) throw new Error();
     return response.json();

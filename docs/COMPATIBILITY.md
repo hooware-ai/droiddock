@@ -12,7 +12,7 @@ Keep these layers separate. A later layer does not inherit a pass from an earlie
 | --- | --- | --- |
 | Offline suite and CI | Protocol framing, structured controls, HTTP/WebSocket boundaries, ownership, setup helpers, diagnostics, and publication checks on the runner | That a phone streamed, that a browser decoded frames, or that Linux/macOS live setup works |
 | Packet diagnostic (`node scripts/Test-DroidDock.mjs --live`) | That an authorized Windows host received session metadata and advancing media packets | That video appeared on a canvas, or that input, rotation, reconnect, or handoff worked |
-| Live browser check | That a person inspected rendered phone video and named controls on a synthetic screen | Implied success from a Connected label, packet counts, or canvas size alone |
+| Live browser check | That a person inspected rendered phone video and named controls on a synthetic screen | Implied success from a Connected label, packet counts, local stream statistics, or canvas size alone |
 
 Use **Pass**, **Fail**, or **Not run** for each live column. Do not infer Pass from a different column.
 

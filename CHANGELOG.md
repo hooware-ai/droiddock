@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors. This document 
 
 ## Unreleased
 
+- Optional local stream statistics in Details: a 1-second rolling window of media bytes received, decoded frames drawn, and current decode queue length. The option is off by default, stays in the browser tab, is not announced periodically, and does not treat a still phone screen as a failure. Configured encoder limits remain separate from measured rates.
 - In-app Help panel on the side rail documenting current keyboard, pointer, paste, and fallback-text behavior, including focus requirements, Escape/Back, and byte limits. Help is static, usable while disconnected, restores focus to its trigger, and does not send phone input.
 - Manual, masked phone PIN entry using standard Android digit key events, with separate Backspace and Enter controls, no automatic submission or retry, and clearing on send, panel closure, focus loss and session loss. Protected-screen visibility and remote biometric authentication remain unsupported.
 

@@ -31,14 +31,14 @@ The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dy
 | `src/droiddock/server.ts` | Loopback HTTP assets, request validation, WebSocket ownership, session lifecycle, current-session progress, status. |
 | `src/droiddock/config.ts` | Local config and environment overrides. |
 | `src/process.ts` | Bounded subprocess execution. |
-| `droiddock/public/` | Browser UI, WebCodecs decoding, input events, styles. |
+| `droiddock/public/` | Browser UI, WebCodecs decoding, input events, optional local stream statistics, styles. |
 | `droiddock/vendor/scrcpy-4.1/` | Unmodified server, upstream license, and provenance/checksum manifest. |
 | `scripts/setup.mjs` | Installation preparation, config/device selection, service inspection. |
 | `scripts/launch.mjs` | Detached service launch/reuse. |
 | `scripts/phone.mjs` | Narrow open/status/disconnect helper for local integrations. |
 | `scripts/*.ps1` | Windows bootstrap, discovery, and entry points. |
 | `scripts/Test-DroidDock.mjs` | Baseline and opt-in live diagnostics. |
-| `droiddock/tests/` | Offline protocol, boundary, ownership, setup, lifecycle, diagnostic, keyboard/focus, fullscreen, and startup-progress tests. |
+| `droiddock/tests/` | Offline protocol, boundary, ownership, setup, lifecycle, diagnostic, keyboard/focus, fullscreen, startup-progress, and stream-statistics tests. |
 
 ## Ownership and lifecycle
 
@@ -51,6 +51,8 @@ Installation and configuration identifiers let helpers distinguish a service for
 ## Browser and request boundaries
 
 The service uses `127.0.0.1`, Host/Origin validation, custom-header control POSTs, an asset allowlist, and CSP. WebSockets require the exact local Origin. Browser connect/disconnect actions are bound to the owning socket; helper HTTP actions follow their separate guarded path. Read the actual request handlers before modifying this distinction.
+
+Optional stream statistics are computed in the browser from observed media-packet bytes, drawn frames, and `decodeQueueSize`. They are not sent to the service and are not a substitute for inspecting rendered video.
 
 Structured controls validate sizes and ranges before serialization. Explicit paste is capped at 65,536 UTF-8 bytes; fallback text injection is capped at 300. The WebSocket payload allowance accounts for JSON escaping. Slow browser delivery and congested control output trigger bounded failure instead of unlimited buffering.
 

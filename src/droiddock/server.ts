@@ -117,7 +117,7 @@ export function allowedRequest(req: Pick<IncomingMessage, "headers">, expected: 
 function reply(res: ServerResponse, code: number, value: unknown) {
   res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(value));
 }
-const assets: Record<string, [string, string]> = { "/": ["index.html", "text/html; charset=utf-8"], "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/styles.css": ["styles.css", "text/css; charset=utf-8"] };
+const assets: Record<string, [string, string]> = { "/": ["index.html", "text/html; charset=utf-8"], "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/stream-stats.js": ["stream-stats.js", "text/javascript; charset=utf-8"], "/styles.css": ["styles.css", "text/css; charset=utf-8"] };
 const http = createServer(async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");

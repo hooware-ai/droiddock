@@ -57,6 +57,8 @@ test('Help is a named static panel that documents pointer, keyboard, paste, and 
   assert.match(html, /300 UTF-8 bytes per send/);
   assert.match(html, /ASCII and some accented letters/);
   assert.match(html, /N \/ 300 bytes/);
+  assert.match(html, /optional local stream statistics/);
+  assert.match(html, /not end-to-end latency/);
   assert.match(css, /\.help-panel h2\{/);
   assert.match(css, /max-height:calc\(100dvh - 16px\)/);
   assert.match(css, /width:min\(270px,calc\(100vw - var\(--rail\) - 16px\)\)/);
@@ -163,5 +165,6 @@ test('Help stays off the packet, decoder, and pointer-move paths', () => {
   assert.match(appSource, /function closeHelpControls/);
   assert.equal((appSource.match(/\$\('help-controls'\)\.addEventListener/g) || []).length, 1);
   assert.equal((appSource.match(/\$\('close-help'\)\.addEventListener/g) || []).length, 1);
-  assert.doesNotMatch(appSource, /setInterval\(/);
+  assert.doesNotMatch(decode, /setInterval\(/);
+  assert.doesNotMatch(move, /setInterval\(/);
 });
