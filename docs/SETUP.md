@@ -101,6 +101,8 @@ The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for 
 
 ## Recovery
 
+For concrete examples of USB authorization, missing tools, and wireless reconnects, see [troubleshooting](TROUBLESHOOTING.md).
+
 | Situation | Action |
 | --- | --- |
 | Interrupted install | Rerun the installer; preserve local configuration and edits. |
