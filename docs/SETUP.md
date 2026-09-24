@@ -46,7 +46,7 @@ Put the PC and phone on the same network. On the phone, open **Developer options
 & '<ADB executable path>' pair '<phone-ip>:<pairing-port>'
 ```
 
-Type the short-lived code directly into ADB's prompt. Keep it out of command arguments, chat, captured terminal transcripts, logs, and tracked files. An agent must not capture the terminal while the code may be visible. If a private interactive prompt is unavailable, the user completes this one pairing step locally.
+Prefer typing the short-lived code directly into ADB's prompt. If the user has already supplied the code to an agent in the current task and authorized pairing, the agent may use it for that one attempt without asking for duplicate entry. Prefer non-echo input to ADB; do not place the code in command arguments, scripts, project files, persistent logs, Git, issues, or public reports. Avoid repeating or displaying it. A private task or tool transcript may retain a code supplied there, so do not promise transcript secrecy. If no code was supplied and a private input path is unavailable, the user completes this one pairing step locally.
 
 DroidDock discovers the paired phone's advertised connection endpoint by its permanent serial. If mDNS discovery is unavailable, use the separate connection endpoint shown on the main Wireless debugging screen:
 
@@ -54,7 +54,7 @@ DroidDock discovers the paired phone's advertised connection endpoint by its per
 & '<ADB executable path>' connect '<phone-ip>:<connection-port>'
 ```
 
-The pairing port and connection port differ and can change. Neither is the device identity. Rerun setup after connection. If pairing expires, repeat the private prompt flow. Do not restart shared ADB or disturb other devices to recover one phone.
+The pairing port and connection port differ and can change. Neither is the device identity. Rerun setup after connection. If pairing expires, repeat pairing with a fresh code. Do not restart shared ADB or disturb other devices to recover one phone.
 
 ## Configuration and launch
 
@@ -129,4 +129,4 @@ To remove DroidDock, stop the verified service, preserve any local work you need
 
 ## Agent-assisted setup
 
-Read [AGENTS.md](../AGENTS.md), inspect the host and checkout, and execute the same documented installer. Clone only into an empty destination; preserve dirty work and local configuration. Ask the user only for physical phone actions, ambiguous selection, private pairing, or required platform approvals. Complete routine setup and recovery directly, verify the actual browser view with supported tools, and report any missing verification explicitly.
+Read [AGENTS.md](../AGENTS.md), inspect the host and checkout, and execute the same documented installer. Clone only into an empty destination; preserve dirty work and local configuration. Ask the user only for physical phone actions, ambiguous selection, pairing input not already supplied in the current task, or required platform approvals. Complete routine setup and recovery directly, verify the actual browser view with supported tools, and report any missing verification explicitly.
