@@ -77,7 +77,7 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
+function loadBrowser({ localStorage, focused = true, hidden = false, fetchImpl } = {}) {
   const elements = new Map();
   const documentHandlers = {};
   const windowHandlers = {};
@@ -158,7 +158,8 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
     ResizeObserver: Observer,
     setTimeout: () => 1,
     clearTimeout() {},
-    fetch: (url) => { requests.push(url); return new Promise(() => {}); },
+    fetch: (url, options) => { requests.push(url); return fetchImpl ? fetchImpl(url, options) : new Promise(() => {}); },
+    AbortController,
     requestAnimationFrame: () => 1,
     cancelAnimationFrame() {},
     TextEncoder,

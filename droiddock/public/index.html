@@ -63,9 +63,9 @@
             </ul>
             <h3>Paste</h3>
             <ul>
-              <li>Press Ctrl+V over the focused phone screen to paste plain text.</li>
+              <li>Press Ctrl+V over the focused phone screen to paste text, one image, or one file. Use Paste file if the browser does not expose copied files.</li>
               <li>Unicode, emoji, and multiline text are supported when the Android app accepts them, up to 64 KiB of UTF-8.</li>
-              <li>Paste changes the phone clipboard. Images and files are not supported.</li>
+              <li>Images and files up to 16 MiB need the optional Android paste helper. The focused Android app must support rich-content paste; use its Attach control if nothing appears.</li>
             </ul>
             <h3>Fallback text</h3>
             <ul>
@@ -101,6 +101,7 @@
             <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
             <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
             <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
+            <div class="file-paste"><button id="choose-file" type="button" aria-label="Paste file" disabled>Paste file</button><input id="file-input" type="file" hidden aria-label="Choose one file to paste"><p class="text-help">Sends one file to the focused Android app when it supports rich paste. Maximum 16 MiB.</p></div>
 
             <p id="message" class="message" role="status" aria-live="polite">Phone must be connected through ADB.</p>
           </div>

@@ -1,13 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { ScrcpySession } from "./session.js";
 import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
+import { pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const installationId = createHash("sha256").update(resolve(root).toLowerCase()).digest("hex").slice(0, 16);
@@ -28,6 +29,8 @@ let startupTimer: NodeJS.Timeout | undefined;
 let packetCount = 0;
 let shuttingDown = false;
 let connectionIntent = 0;
+let pasteCapability: string | undefined;
+let pasteAbort: AbortController | undefined;
 const cleanupSessions = new Set<ScrcpySession>();
 const cleanupMessage = "Phone cleanup could not be confirmed. Restore the phone connection and select Connect to retry cleanup.";
 const lockMonitor = new LockStateMonitor(update => send(update));
@@ -64,6 +67,7 @@ async function cleanup(): Promise<void> {
 }
 function stop(next: State = "idle", detail = "Disconnected. Connect when you're ready."): Promise<void> {
   const intent = ++connectionIntent;
+  pasteAbort?.abort();
   const old = session, oldPending = pending;
   if (old) cleanupSessions.add(old);
   session = undefined; pending = undefined;
@@ -133,6 +137,39 @@ const http = createServer(async (req, res) => {
   if (!allowedRequest(req, authority)) { reply(res, 403, { error: "Only the local DroidDock page can access this service." }); return; }
   try {
     if (req.url === "/api/status" && req.method === "GET") { reply(res, 200, status()); return; }
+    if (req.url === "/api/paste-file") {
+      if (req.method !== "POST" || req.headers.origin !== origin || req.headers["x-droiddock"] !== "1" ||
+          !pasteCapability || req.headers["x-paste-capability"] !== pasteCapability ||
+          !client || client.readyState !== WebSocket.OPEN || !session || state !== "connected") {
+        reply(res, 403, { error: "Only the current connected phone view can paste files." }); return;
+      }
+      if (pasteAbort) { reply(res, 409, { error: "Another file paste is still running." }); return; }
+      const owner = client, current = session, controller = new AbortController();
+      pasteAbort = controller;
+      const timeout = setTimeout(() => controller.abort(), 75000);
+      req.once("aborted", () => controller.abort());
+      res.once("close", () => { if (!res.writableEnded) controller.abort(); });
+      let staged: string | undefined;
+      try {
+        const mime = pasteMime(req.headers["content-type"]);
+        staged = await stagePasteFile(req, controller.signal);
+        if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
+          throw new PasteFileError("The phone view changed. Paste again from the current view.", 409);
+        await current.pasteFile(staged, mime, controller.signal);
+        if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
+          throw new PasteFileError("The phone view changed. Paste again from the current view.", 409);
+        reply(res, 200, { message: "Paste sent to the focused phone app. If nothing appears, use that app's Attach control." });
+      } catch (error) {
+        if (!res.destroyed) reply(res, error instanceof PasteFileError ? error.status : 409,
+          { error: error instanceof PasteFileError ? error.message : controller.signal.aborted ? "File paste was cancelled." :
+            error instanceof Error ? error.message : "The phone could not paste this file." });
+      } finally {
+        clearTimeout(timeout);
+        if (staged) await unlink(staged).catch(() => {});
+        if (pasteAbort === controller) pasteAbort = undefined;
+      }
+      return;
+    }
     if (req.url?.startsWith("/api/")) {
       if (req.method !== "POST" || req.headers["x-droiddock"] !== "1") { reply(res, 403, { error: "DroidDock request header required." }); return; }
       // Browsers control their own WebSocket. A delayed HTTP request from an old
@@ -174,16 +211,19 @@ sockets.on("connection", (ws: WebSocket) => {
   if (previous) {
     // Invalidate the old owner before cleanup or any asynchronous socket events.
     client = undefined;
+    pasteCapability = undefined;
     void stop();
     if (previous.readyState === WebSocket.OPEN) previous.send(JSON.stringify({ type: "moved", message: "Phone opened elsewhere." }));
     previous.close(4001, "Phone opened elsewhere");
   }
   client = ws;
+  pasteCapability = randomBytes(32).toString("hex");
   lockMonitor.reset();
   let alive = true, controls = 0;
   const heartbeat = setInterval(() => { if (!alive) { ws.terminate(); return; } alive = false; controls = 0; ws.ping(); }, 15000);
   ws.on("pong", () => { alive = true; });
   send({ ...status(), snapshot: true });
+  send({ type: "pasteCapability", value: pasteCapability });
   ws.on("message", (data, binary) => {
     if (client !== ws) return;
     try {
@@ -204,7 +244,7 @@ sockets.on("connection", (ws: WebSocket) => {
   ws.on("error", () => ws.terminate());
   ws.on("close", () => {
     clearInterval(heartbeat);
-    if (client === ws) { client = undefined; void stop(); }
+    if (client === ws) { client = undefined; pasteCapability = undefined; void stop(); }
   });
 });
 async function shutdown() {

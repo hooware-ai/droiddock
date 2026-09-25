@@ -25,7 +25,7 @@ async function fixture(t, implementation) {
   const root = await mkdtemp(join(base, 'security-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(folder, 'session.js'), implementation);
   const reservation = createServer();
@@ -97,6 +97,33 @@ test('malformed controls never echo JSON parser excerpts', { timeout: 10000 }, a
   const error = await until(() => bridge.messages.find(message => message.type === 'inputError'));
   assert.equal(error.message, 'Invalid JSON control message.');
   assert.doesNotMatch(JSON.stringify(bridge.messages), /SYNTHETIC_PRIVATE/);
+});
+
+test('rich paste requires current controller capability and releases the host staging file', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    import { readFile, writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    export class ScrcpySession {
+      constructor(root, onEvent) { Object.assign(this, { root, onEvent }); }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      async pasteFile(path, mime) {
+        const data = await readFile(path);
+        await writeFile(join(this.root, 'paste-result.json'), JSON.stringify({ path, mime, bytes:[...data] }));
+      }
+      async stop() {}
+    }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  const token = await until(() => bridge.messages.find(message => message.type === 'pasteCapability')?.value);
+  const url = `${bridge.origin}/api/paste-file`;
+  const headers = { origin: bridge.origin, 'x-droiddock': '1', 'x-paste-capability': token, 'content-type': 'image/png' };
+  assert.equal((await fetch(url, { method:'POST', headers: { ...headers, 'x-paste-capability':'0'.repeat(64) }, body:Buffer.from([1]) })).status, 403);
+  assert.equal((await fetch(url, { method:'POST', headers, body:Buffer.from([1, 2, 3]) })).status, 200);
+  const result = JSON.parse(await readFile(join(bridge.root, 'paste-result.json'), 'utf8'));
+  assert.equal(result.mime, 'image/png');
+  assert.deepEqual(result.bytes, [1, 2, 3]);
+  await assert.rejects(readFile(result.path));
 });
 
 test('only the initial error greeting is marked as a snapshot, never current attempt failures', { timeout: 10000 }, async t => {
@@ -279,7 +306,7 @@ async function startupBridge(t) {
   const root = await mkdtemp(join(base, 'startup-cancel-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js']) {
+  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule({

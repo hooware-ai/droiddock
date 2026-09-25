@@ -9,6 +9,7 @@ const vendor = 'droiddock/vendor/scrcpy-4.1/';
 const pinned = new Map([
   [vendor + 'scrcpy-server', 'deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae'],
   [vendor + 'LICENSE', '01c12035bf35af37241298dc7ad538eb2a07e5c940437bc6876feeaa9d1951d0'],
+  ['android/paste-helper/gradle/wrapper/gradle-wrapper.jar', '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7'],
 ]);
 const rootFiles = new Set(['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'config.example.json']);
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
@@ -42,7 +43,7 @@ function allowedPath(path) {
   if (rootFiles.has(path) || pinned.has(path) || path === vendor + 'upstream.json') return true;
   if (/(?:^|\/)(?:node_modules|dist|artifacts|logs|screenshots|\.setup|\.vscode|\.idea|\.env[^/]*)(?:\/|$)/i.test(path)) return false;
   if (/(?:^|\/)(?:config\.local|credentials?|secrets?|id_rsa|id_ed25519)(?:[./]|$)|\.(?:log|pem|key|pfx|p12|png|jpe?g|webp|gif|zip|map)$/i.test(path)) return false;
-  return /^(?:src\/.*\.ts|scripts\/[^/]+\.(?:mjs|ps1)|droiddock\/tests\/[^/]+\.test\.mjs|droiddock\/public\/[^/]+\.(?:html|css|js)|docs\/.*\.md|\.github\/(?:workflows\/[^/]+\.ya?ml|ISSUE_TEMPLATE\/[^/]+\.(?:md|ya?ml)|(?:PULL_REQUEST_TEMPLATE|pull_request_template)\.md|(?:FUNDING|dependabot)\.yml))$/.test(path);
+  return /^(?:src\/.*\.ts|scripts\/[^/]+\.(?:mjs|ps1)|droiddock\/tests\/[^/]+\.test\.mjs|droiddock\/public\/[^/]+\.(?:html|css|js)|docs\/.*\.md|android\/paste-helper\/(?:gradlew(?:\.bat)?|(?:build|settings)\.gradle\.kts|gradle\/wrapper\/gradle-wrapper\.properties|(?:src|test-target\/src)\/main\/(?:AndroidManifest\.xml|java\/ai\/hooware\/droiddock\/(?:paste|pastetest)\/[A-Za-z]+\.java)|test-target\/build\.gradle\.kts)|\.github\/(?:workflows\/[^/]+\.ya?ml|ISSUE_TEMPLATE\/[^/]+\.(?:md|ya?ml)|(?:PULL_REQUEST_TEMPLATE|pull_request_template)\.md|(?:FUNDING|dependabot)\.yml))$/.test(path);
 }
 
 function textRules(text, deny, { attribution = false } = {}) {

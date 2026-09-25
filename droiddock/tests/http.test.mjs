@@ -48,8 +48,17 @@ test('local HTTP and WebSocket boundary rejects foreign websites and a second co
     }
     await rejected('https://evil.example'); await rejected(undefined);
     owner = new WebSocket(`ws://127.0.0.1:${port}/stream`, { origin });
+    const greeting = [];
+    owner.on('message', data => greeting.push(JSON.parse(data.toString())));
     const initialMessage = once(owner, 'message'); await once(owner, 'open');
     assert.equal(JSON.parse((await initialMessage)[0].toString()).state, 'idle');
+    for (let i = 0; greeting.length < 2 && i < 20; i++) await delay(10);
+    assert.match(greeting.find(message => message.type === 'pasteCapability')?.value ?? '', /^[a-f0-9]{64}$/);
+    const pasteUrl = `${origin}/api/paste-file`;
+    const fileHeaders = { 'x-droiddock': '1', 'content-type': 'image/png', 'x-paste-capability': greeting.find(message => message.type === 'pasteCapability').value };
+    assert.equal((await fetch(pasteUrl, { method: 'POST', headers: fileHeaders, body: 'x' })).status, 403);
+    assert.equal((await fetch(pasteUrl, { method: 'POST', headers: { ...fileHeaders, origin: 'https://evil.example' }, body: 'x' })).status, 403);
+    assert.equal((await fetch(pasteUrl, { method: 'POST', headers: { ...fileHeaders, origin, 'x-paste-capability': '0'.repeat(64) }, body: 'x' })).status, 403);
     assert.equal((await fetch(`${origin}/api/shutdown`, { method: 'POST', headers: { 'X-DroidDock': '1' } })).status, 409);
     await rejected(origin);
     const inputError = once(owner, 'message'); owner.send(JSON.stringify({ type: 'key', key: 'home' }));

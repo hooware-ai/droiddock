@@ -53,7 +53,7 @@ test('Help is a named static panel that documents pointer, keyboard, paste, and 
   assert.match(html, /Escape sends Back/);
   assert.match(html, /Ctrl\+V over the focused phone screen/);
   assert.match(html, /64 KiB of UTF-8/);
-  assert.match(html, /Images and files are not supported/);
+  assert.match(html, /Images and files up to 16 MiB need the optional Android paste helper/);
   assert.match(html, /300 UTF-8 bytes per send/);
   assert.match(html, /ASCII and some accented letters/);
   assert.match(html, /N \/ 300 bytes/);
