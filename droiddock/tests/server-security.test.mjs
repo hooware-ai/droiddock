@@ -220,7 +220,7 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
     import { setTimeout as delay } from 'node:timers/promises';
     export const state = {
       calls:[], forward:'', oldIdentity:null, newIdentity:'SYNTHETICPHONE', discovery:'NEW',
-      failRemove:false, failRm:false, allocationTimeout:false,
+      failRemove:false, failRm:false, failPrivateRm:false, failBroadcast:false, allocationTimeout:false,
       hold:Object.assign(Object.create(null), ${JSON.stringify(defaultHold)}),
       waiters:Object.create(null), released:Object.create(null),
     };
@@ -252,6 +252,12 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
         const identity = transport === 'OLD' ? state.oldIdentity : state.newIdentity;
         if (!identity) throw new Error('SYNTHETIC_PRIVATE_OFFLINE');
         return {stdout:identity};
+      }
+      if (args[2] === 'shell' && args[3] === 'pm' && args[4] === 'path') return {stdout:'package:/synthetic/helper.apk'};
+      if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'broadcast') return {stdout:'Broadcast completed: result=' + (state.failBroadcast ? '0' : '1')};
+      if (args[2] === 'shell' && args[3] === 'run-as') {
+        if (args[5] === 'rm' && state.failPrivateRm) throw new Error('SYNTHETIC_PRIVATE_HELPER_FILE_ERROR');
+        return {stdout:''};
       }
       if (args[2] === 'forward' && args[3] === '--remove') {
         if (state.failRemove) throw new Error('SYNTHETIC_PRIVATE_FORWARD_ERROR');
@@ -620,4 +626,42 @@ test('lock reads use only the verified session transport and bounded cancellable
   session.closed = true;
   assert.equal(await session.readLockState(controller.signal), 'unknown');
   assert.equal(state.calls.length, 1);
+});
+
+test('failed paste staging cleanup survives disconnect and retries on the verified phone', async t => {
+  const { session, state } = await sessionFixture(t);
+  state.oldIdentity = 'SYNTHETICPHONE';
+  session.transport = 'OLD';
+  session.control = { destroyed:false, writableLength:0, write() {}, destroy() { this.destroyed = true; } };
+  state.failRm = true;
+  await session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal);
+  assert.equal(session.pasteCleanup.size, 1, 'failed transfer cleanup remains owned by session');
+  const [id] = session.pasteCleanup.keys();
+  state.oldIdentity = null;
+  await assert.rejects(session.stop(), /cleanup could not be confirmed/i);
+  assert.equal(session.pasteCleanup.size, 1, 'disconnect cannot forget a device file');
+  state.failRm = false;
+  await session.stop();
+  assert.equal(session.pasteCleanup.size, 0);
+  assert.ok(state.calls.some(call => call.args.join(' ') === `-s NEW shell rm -f /data/local/tmp/droiddock-paste-${id}`));
+});
+
+test('partial helper-private paste file is retained for verified cleanup retry', async t => {
+  const { session, state } = await sessionFixture(t);
+  state.oldIdentity = 'SYNTHETICPHONE';
+  session.transport = 'OLD';
+  session.control = { destroyed:false, writableLength:0, write() {}, destroy() { this.destroyed = true; } };
+  state.failBroadcast = true;
+  state.failPrivateRm = true;
+  await assert.rejects(session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), /prepare rich clipboard/i);
+  assert.equal(session.pasteCleanup.size, 1);
+  const [id, pending] = session.pasteCleanup.entries().next().value;
+  assert.equal(pending.remote, false);
+  assert.equal(pending.privateFile, true);
+  state.oldIdentity = null;
+  await assert.rejects(session.stop(), /cleanup could not be confirmed/i);
+  state.failPrivateRm = false;
+  await session.stop();
+  assert.equal(session.pasteCleanup.size, 0);
+  assert.ok(state.calls.some(call => call.args.join(' ') === `-s NEW shell run-as ai.hooware.droiddock.paste rm -f files/paste/${id}`));
 });

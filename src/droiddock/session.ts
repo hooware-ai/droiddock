@@ -27,6 +27,8 @@ export class ScrcpySession {
   private control?: Socket;
   private closed = false;
   private remoteMayExist = false;
+  private pastePending?: Promise<void>;
+  private readonly pasteCleanup = new Map<string, { remote: boolean; privateFile: boolean }>();
   private readonly scid = randomInt(1, 0x7fffffff).toString(16).padStart(8, "0");
   private readonly remote = `/data/local/tmp/droiddock-${this.scid}.jar`;
   private readonly adb = config.adb;
@@ -146,6 +148,13 @@ export class ScrcpySession {
   }
 
   async pasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<void> {
+    const work = this.performPasteFile(localPath, mime, signal);
+    this.pastePending = work;
+    try { await work; }
+    finally { if (this.pastePending === work) this.pastePending = undefined; }
+  }
+
+  private async performPasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<void> {
     this.check(signal);
     if (!this.transport || !this.control || this.control.destroyed) throw new Error("Connect your phone first.");
     const identity = await runChecked(this.adb, ["-s", this.transport, "shell", "getprop", "ro.serialno"], { timeoutMs: 3000, signal });
@@ -156,7 +165,10 @@ export class ScrcpySession {
     const id = randomBytes(16).toString("hex");
     const remote = `/data/local/tmp/droiddock-paste-${id}`;
     const privateFile = `files/paste/${id}`;
-    let clipboardSet = false;
+    // A failed push or copy can still leave a partial file. Keep the paths
+    // until removal succeeds, including across a disconnected session retry.
+    const pending = { remote: true, privateFile: false };
+    this.pasteCleanup.set(id, pending);
     const run = (args: string[], timeoutMs = 5000, cancellable = true) => runChecked(this.adb, ["-s", this.transport, ...args], {
       timeoutMs, maxOutputBytes: 4096, ...(cancellable ? { signal } : {}),
     });
@@ -164,18 +176,38 @@ export class ScrcpySession {
       await run(["push", localPath, remote], 60000);
       this.check(signal);
       await run(["shell", "run-as", packageName, "mkdir", "-p", "files/paste"]);
+      pending.privateFile = true;
       await run(["shell", "run-as", packageName, "cp", remote, privateFile]);
       this.check(signal);
       const result = await run(["shell", "am", "broadcast", "-a", "ai.hooware.droiddock.paste.SET_CLIP",
         "-n", `${packageName}/.PasteReceiver`, "--es", "id", id, "--es", "mime", mime]);
       if (!/\bresult=1\b/.test(result.stdout)) throw new Error("The phone could not prepare rich clipboard content.");
-      clipboardSet = true;
+      // The clipboard URI now needs the helper-private file until another
+      // paste replaces it; the helper bounds its retained private files.
+      pending.privateFile = false;
       this.check(signal);
       this.input({ type: "key", key: "paste" });
     } finally {
-      await run(["shell", "rm", "-f", remote], 3000, false).catch(() => {});
-      if (!clipboardSet) await run(["shell", "run-as", packageName, "rm", "-f", privateFile], 3000, false).catch(() => {});
+      await this.cleanupPasteTransfers().catch(() => {});
     }
+  }
+
+  private async cleanupPasteTransfers(): Promise<void> {
+    if (!this.pasteCleanup.size) return;
+    await this.cleanupTransport();
+    const packageName = "ai.hooware.droiddock.paste";
+    for (const [id, pending] of this.pasteCleanup) {
+      if (pending.remote) {
+        try { await this.command(["shell", "rm", "-f", `/data/local/tmp/droiddock-paste-${id}`], 3000); pending.remote = false; }
+        catch { /* Keep this exact path for the next verified-phone retry. */ }
+      }
+      if (pending.privateFile) {
+        try { await this.command(["shell", "run-as", packageName, "rm", "-f", `files/paste/${id}`], 3000); pending.privateFile = false; }
+        catch { /* Keep this exact path for the next verified-phone retry. */ }
+      }
+      if (!pending.remote && !pending.privateFile) this.pasteCleanup.delete(id);
+    }
+    if (this.pasteCleanup.size) throw new Error("Phone paste cleanup could not be confirmed.");
   }
 
   input(value: unknown): void {
@@ -187,6 +219,8 @@ export class ScrcpySession {
   async stop(): Promise<void> {
     this.closed = true;
     this.video?.destroy(); this.control?.destroy(); this.child?.kill();
+    await this.pastePending?.catch(() => {});
+    let cleanupFailed = false;
     try {
       if (this.port || this.forwardMayExist) {
         const forwards = await runChecked(this.adb, ["forward", "--list"], { timeoutMs: 3000 });
@@ -208,7 +242,10 @@ export class ScrcpySession {
       if (this.port || this.remoteMayExist) await this.cleanupTransport();
       if (this.port) { await this.command(["forward", "--remove", `tcp:${this.port}`], 3000); this.port = 0; this.forwardMayExist = false; }
       if (this.remoteMayExist) { await this.command(["shell", "rm", "-f", this.remote]); this.remoteMayExist = false; }
-    } catch {
+    } catch { cleanupFailed = true; }
+    try { await this.cleanupPasteTransfers(); }
+    catch { cleanupFailed = true; }
+    if (cleanupFailed) {
       throw new Error("Phone cleanup could not be confirmed. Restore the phone connection and select Connect to retry cleanup.");
     }
   }
