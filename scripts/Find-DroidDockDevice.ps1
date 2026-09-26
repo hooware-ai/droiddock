@@ -3,10 +3,13 @@
 param(
   [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]+$')][string]$DeviceSerial,
   [Parameter(Mandatory)][string]$AdbPath,
-  [ValidateRange(1, 600)][int]$WaitSeconds = 15
+  [ValidateRange(1, 600)][int]$WaitSeconds = 15,
+  [switch]$ReportRecovery
 )
 $ErrorActionPreference = 'Stop'
 $script:AdbPath = (Get-Command $AdbPath -ErrorAction Stop).Source
+if ($ReportRecovery) { . (Join-Path $PSScriptRoot 'Pairing-Recovery.ps1') }
+$script:RecoveryHint = 'unknown'
 
 function Invoke-MirrorProcess {
   param(
@@ -86,6 +89,7 @@ function Find-MirrorDevice {
   $verify = {
     param([string]$Transport)
     $identity = & $query -Command @('-s', $Transport, 'shell', 'getprop', 'ro.serialno')
+    $script:LastVerifyEvidence = if ($identity.ExitCode -eq -1) { 'timeout' } elseif ($identity.ExitCode -eq 0 -and $identity.Text.Trim() -cne $Serial) { 'mismatch' } else { 'other' }
     $identity.ExitCode -eq 0 -and $identity.Text.Trim() -ceq $Serial
   }
   do {
@@ -98,11 +102,16 @@ function Find-MirrorDevice {
       }
     }
     $services = & $query -Command @('mdns', 'services')
+    if ($ReportRecovery) {
+      $script:RecoveryHint = Get-DroidDockRecoveryHint -DevicesText $devices.Text -DevicesExitCode $devices.ExitCode -ServicesText $services.Text -ServicesExitCode $services.ExitCode -Serial $Serial
+    }
     if ($services.ExitCode -eq 0) {
       foreach ($endpoint in @(Get-MirrorEndpoints -Text $services.Text -Serial $Serial | Select-Object -Unique)) {
         $connect = & $query -Command @('connect', $endpoint)
-        if ($connect.ExitCode -eq 0 -and (& $verify $endpoint)) {
-          return $endpoint
+        if ($ReportRecovery -and $connect.ExitCode -eq -1) { $script:RecoveryHint = 'unknown' }
+        if ($connect.ExitCode -eq 0) {
+          if (& $verify $endpoint) { return $endpoint }
+          if ($ReportRecovery -and $script:LastVerifyEvidence -in @('timeout', 'mismatch')) { $script:RecoveryHint = 'unknown' }
         }
       }
     }
@@ -115,4 +124,14 @@ function Find-MirrorDevice {
 }
 
 
-Find-MirrorDevice -Serial $DeviceSerial -TimeoutSeconds $WaitSeconds
+if ($ReportRecovery) {
+  try {
+    $transport = Find-MirrorDevice -Serial $DeviceSerial -TimeoutSeconds $WaitSeconds
+    [pscustomobject]@{ transport = $transport; recovery = 'not-needed' } | ConvertTo-Json -Compress
+  } catch {
+    # Do not expose raw discovery output or identifiers to browser status.
+    [pscustomobject]@{ transport = $null; recovery = $script:RecoveryHint } | ConvertTo-Json -Compress
+  }
+} else {
+  Find-MirrorDevice -Serial $DeviceSerial -TimeoutSeconds $WaitSeconds
+}

@@ -92,6 +92,50 @@ test('bridge status redacts a failed device command', { timeout: 10000 }, async 
   assert.doesNotMatch(JSON.stringify([failed, bridge.messages]), /SYNTHETIC_PRIVATE/);
 });
 
+test('candidate recovery status is sanitized and clears on disconnect', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    export class ScrcpySession {
+      async start() {
+        const error = new Error('The configured phone is unavailable. A wireless pairing service may belong to it, but its identity is unverified. Check Wireless debugging on the phone.');
+        error.name = 'PhoneDiscoveryError'; error.recovery = 'candidate'; throw error;
+      }
+      async stop() {}
+    }
+  `);
+  bridge.send('connect');
+  const failed = await until(async () => { const value = await bridge.status(); return value.state === 'error' && value; });
+  assert.equal(failed.recovery, 'candidate');
+  assert.match(failed.message, /identity is unverified/);
+  assert.doesNotMatch(JSON.stringify([failed, bridge.messages]), /SYNTHETIC_PRIVATE|192\.0\.2/);
+  bridge.send('disconnect');
+  const cleared = await until(async () => { const value = await bridge.status(); return value.state === 'idle' && value; });
+  assert.equal(cleared.recovery, 'unknown');
+});
+
+test('handoff rejects a late pairing candidate from the displaced session', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    export class ScrcpySession {
+      async start() {
+        await new Promise(resolve => setTimeout(resolve, 90));
+        const error = new Error('The configured phone is unavailable.');
+        error.name = 'PhoneDiscoveryError'; error.recovery = 'candidate'; throw error;
+      }
+      async stop() {}
+    }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connecting');
+  const replacement = new WebSocket(bridge.origin.replace('http:', 'ws:') + '/stream?takeover=1', { origin:bridge.origin });
+  replacement.on('error', () => {});
+  t.after(() => replacement.terminate());
+  await once(replacement, 'open');
+  await delay(150);
+  const after = await bridge.status();
+  assert.equal(after.state, 'idle');
+  assert.equal(after.recovery, 'unknown');
+  assert.equal(bridge.messages.some(value => value.recovery === 'candidate'), false);
+});
+
 test('malformed controls never echo JSON parser excerpts', { timeout: 10000 }, async t => {
   const bridge = await fixture(t, 'export class ScrcpySession {}');
   bridge.sendRaw('{"SYNTHETIC_PRIVATE_INPUT" broken');
@@ -266,7 +310,8 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
       ${logLine}
       const kind = kindOf(file, args);
       ${gate}
-      if (file === 'pwsh') return {stdout:state.discovery};
+      if (file === 'pwsh') return {stdout:args.includes('-ReportRecovery')
+        ? JSON.stringify(state.discoveryReport ?? {transport:state.discovery,recovery:'not-needed'}) : state.discovery};
       if (args.includes('dumpsys')) return {stdout:state.lockDump ?? ''};
       if (args[0] === 'forward' && args[1] === '--list') return {stdout:state.forward};
       const transport = args[1];
@@ -525,6 +570,8 @@ test('cancel during discovery prevents the later vendor push after discovery set
   const started = session.start(abort.signal);
   const discovery = await until(() => state.calls.find(call => commandStage(call) === 'discovery'));
   assert.match(discovery.args[discovery.args.indexOf('-DeviceSerial') + 1], /^SYNTHETICPHONE$/);
+  assert.equal(discovery.options.signal, abort.signal);
+  assert.ok(discovery.args.includes('-ReportRecovery'));
   abort.abort();
   assert.deepEqual(state.calls.map(commandStage), ['discovery']);
   release('discovery');
@@ -537,6 +584,18 @@ test('cancel during discovery prevents the later vendor push after discovery set
   await session.stop();
   assert.deepEqual(state.calls.map(commandStage), ['discovery', 'identity']);
   assert.equal(state.calls.some(call => ['push', 'allocate', 'remove', 'rm'].includes(commandStage(call))), false);
+});
+
+test('discovery candidate is status-only and cannot start device control', async t => {
+  const { session, state } = await sessionFixture(t, { vendor: true });
+  state.discoveryReport = { transport:null, recovery:'candidate' };
+  await assert.rejects(session.start(new AbortController().signal), error => {
+    assert.equal(error.name, 'PhoneDiscoveryError');
+    assert.equal(error.recovery, 'candidate');
+    assert.doesNotMatch(error.message, /SYNTHETICPHONE|SYNTHETIC_ADB/);
+    return true;
+  });
+  assert.deepEqual(state.calls.map(commandStage), ['discovery']);
 });
 
 test('cancel during push prevents tunnel allocation and cleans only the session-owned remote file', async t => {

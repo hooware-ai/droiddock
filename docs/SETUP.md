@@ -56,6 +56,8 @@ DroidDock discovers the paired phone's advertised connection endpoint by its per
 
 The pairing port and connection port differ and can change. Neither is the device identity. Rerun setup after connection. If pairing expires, repeat pairing with a fresh code. Do not restart shared ADB or disturb other devices to recover one phone.
 
+When a DroidDock connection fails, its status may report a `candidate` pairing service or `unknown` recovery evidence. A candidate is only an mDNS association with the configured phone's connect advertisement; DroidDock has not verified the permanent phone identity. An unavailable phone alone does not prove that pairing was lost. The app does not run a pairing command or ask for a code in the browser yet; use the physical phone and the private local terminal steps above when re-pairing is actually needed.
+
 ## Optional direct image and file paste
 
 Direct paste into a compatible focused Android app requires a small, optional DroidDock Android helper. Install it on the **configured phone** after normal setup. You need JDK 17 or newer and Android SDK platform 36 for the one-time build; the checked-in Gradle wrapper pins the build tool and verifies its download checksum. The helper is a debuggable local build because the bridge copies each explicitly pasted file into its private storage with Android's `run-as` command. It has no launcher screen and does not run a background service.

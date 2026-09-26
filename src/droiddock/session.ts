@@ -17,6 +17,17 @@ export const CONNECTION_PROGRESS = {
 
 export type ConnectionProgressMessage = (typeof CONNECTION_PROGRESS)[keyof typeof CONNECTION_PROGRESS];
 
+export type RecoveryHint = "not-needed" | "candidate" | "unknown";
+
+export class PhoneDiscoveryError extends Error {
+  constructor(readonly recovery: RecoveryHint) {
+    super(recovery === "candidate"
+      ? "The configured phone is unavailable. A wireless pairing service may belong to it, but its identity is unverified. Check Wireless debugging on the phone."
+      : "The configured phone is unavailable. Check USB authorization or Wireless debugging. If this computer is no longer paired, re-pairing may help.");
+    this.name = "PhoneDiscoveryError";
+  }
+}
+
 export class ScrcpySession {
   private transport = "";
   private port = 0;
@@ -42,11 +53,23 @@ export class ScrcpySession {
   private check(signal: AbortSignal) { signal.throwIfAborted(); if (this.closed) throw new Error("Session closed."); }
   private progress(message: ConnectionProgressMessage) { if (!this.closed) this.onProgress(message); }
   private command(args: string[], timeoutMs = 8000) { return runChecked(this.adb, ["-s", this.transport, ...args], { timeoutMs }); }
-  private async findTransport(identityTimeout = 8000): Promise<string> {
-    const found = await runChecked("pwsh", ["-NoProfile", "-File", join(this.root, "scripts/Find-DroidDockDevice.ps1"), "-DeviceSerial", this.serial, "-AdbPath", this.adb, "-WaitSeconds", "15"], { timeoutMs: 20000 });
-    const transport = found.stdout.trim();
+  private async findTransport(identityTimeout = 8000, signal?: AbortSignal, reportRecovery = false): Promise<string> {
+    const args = ["-NoProfile", "-File", join(this.root, "scripts/Find-DroidDockDevice.ps1"), "-DeviceSerial", this.serial, "-AdbPath", this.adb, "-WaitSeconds", "15"];
+    if (reportRecovery) args.push("-ReportRecovery");
+    const found = await runChecked("pwsh", args, { timeoutMs: 20000, signal });
+    let transport = found.stdout.trim();
+    if (reportRecovery) {
+      let value: unknown;
+      try { value = JSON.parse(transport); } catch { throw new Error("Phone discovery returned an invalid status."); }
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Phone discovery returned an invalid status.");
+      const report = value as Record<string, unknown>;
+      if (report.transport === null && (report.recovery === "candidate" || report.recovery === "unknown"))
+        throw new PhoneDiscoveryError(report.recovery);
+      if (report.recovery !== "not-needed" || typeof report.transport !== "string") throw new Error("Phone discovery returned an invalid status.");
+      transport = report.transport;
+    }
     if (!transport || /\s/.test(transport)) throw new Error("Phone discovery returned an invalid transport.");
-    const identity = await runChecked(this.adb, ["-s", transport, "shell", "getprop", "ro.serialno"], { timeoutMs: identityTimeout });
+    const identity = await runChecked(this.adb, ["-s", transport, "shell", "getprop", "ro.serialno"], { timeoutMs: identityTimeout, signal });
     if (identity.stdout.trim() !== this.serial) throw new Error("The connected device is not the configured phone.");
     return transport;
   }
@@ -67,7 +90,7 @@ export class ScrcpySession {
     if (!serial || serial === "YOUR_DEVICE_SERIAL") throw new Error("Set deviceSerial in config.local.json before connecting. See README.md.");
     if (!/^[A-Za-z0-9]+$/.test(serial)) throw new Error("Invalid device serial.");
     this.progress(CONNECTION_PROGRESS.findingPhone);
-    const transport = await this.findTransport();
+    const transport = await this.findTransport(8000, signal, true);
     this.check(signal);
     this.transport = transport;
     this.progress(CONNECTION_PROGRESS.preparingConnection);
