@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverPairingEndpoint, pairConfiguredPhone } from '../../dist/droiddock/pairing.js';
+import { discoverPairingEndpoint, pairConfiguredPhone, parsePairingRequest } from '../../dist/droiddock/pairing.js';
 
 const serial = 'SYNTHETICPHONE';
 const address = '192.0.2.10';
@@ -8,6 +8,19 @@ const pairEndpoint = `${address}:37002`;
 const services = `List of discovered mdns services\n  adb-${serial}-x _adb-tls-connect._tcp ${address}:37001\n  adb-guid-y _adb-tls-pairing._tcp ${pairEndpoint}`;
 const devices = 'List of devices attached\n';
 const success = `Enter pairing code: Successfully paired to ${pairEndpoint} [guid=adb-synthetic]`;
+
+test('browser pairing requests accept only a code and optional canonical endpoint', () => {
+  assert.deepEqual(parsePairingRequest({ type: 'pairingRequest', code: '012345' }), { code: '012345' });
+  assert.deepEqual(parsePairingRequest({ type: 'pairingRequest', code: '012345', manualEndpoint: pairEndpoint }),
+    { code: '012345', manualEndpoint: pairEndpoint });
+  for (const input of [
+    null, [], { type: 'pairingRequest' }, { type: 'pairingRequest', code: 123456 },
+    { type: 'pairingRequest', code: '12345' }, { type: 'pairingRequest', code: '123456', expiresAtMs: Date.now() + 1000 },
+    { type: 'pairingRequest', code: '123456', signal: {} },
+    { type: 'pairingRequest', code: '123456', manualEndpoint: 'localhost:37002' },
+    { type: 'pairingRequest', code: '123456', manualEndpoint: '192.0.2.10:0' },
+  ]) assert.equal(parsePairingRequest(input), undefined);
+});
 
 function fakeAdb({ deviceText = devices, serviceText = services, serviceCode = 0, pairCode = 0, pairOutput = success } = {}) {
   const calls = [];

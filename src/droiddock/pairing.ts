@@ -28,6 +28,16 @@ function endpoint(value: string): { value: string; address: string } | undefined
   return { value, address: match[1] };
 }
 
+export function parsePairingRequest(value: unknown): PairingRequest | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const input = value as Record<string, unknown>;
+  if (input.type !== "pairingRequest" || Object.keys(input).some(key => !["type", "code", "manualEndpoint"].includes(key)) ||
+      typeof input.code !== "string" || !/^\d{6}$/.test(input.code)) return;
+  if (input.manualEndpoint !== undefined &&
+      (typeof input.manualEndpoint !== "string" || !endpoint(input.manualEndpoint))) return;
+  return { code: input.code, ...(input.manualEndpoint === undefined ? {} : { manualEndpoint: input.manualEndpoint }) };
+}
+
 type Discovery = { kind: "candidate"; endpoint: string } | { kind: "missing" | "ambiguous" };
 
 // Mirror the conservative #41 recovery evidence: one configured connect row,
@@ -67,7 +77,7 @@ function confirmsPairing(result: CommandResult, selectedEndpoint: string): boole
     new RegExp(`Successfully paired to ${escaped} \\[guid=[^\\]\\r\\n]{1,128}\\]`).test(output);
 }
 
-/** An explicit, single-use local attempt. This helper has no browser or session hook. */
+/** An explicit, single-use local attempt. The caller owns browser authorization and identity verification. */
 export async function pairConfiguredPhone(
   adb: string, serial: string, request: PairingRequest, runner: Runner = runCommand,
 ): Promise<PairingResult> {
