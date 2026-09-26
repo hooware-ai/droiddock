@@ -154,7 +154,7 @@ test('handoff during session startup ignores obsolete callbacks and stale socket
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) {
+    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
       await copyFile(join('dist/droiddock', name), join(fixtureDist, name));
     }
     // File gates make startup and late callbacks deterministic without touching the
@@ -262,7 +262,7 @@ async function withSessionFixture(name, sessionSource, run, extraEnv = {}) {
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const file of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) {
+    for (const file of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
       await copyFile(join('dist/droiddock', file), join(fixtureDist, file));
     }
     await writeFile(join(fixtureDist, 'session.js'), sessionSource);
