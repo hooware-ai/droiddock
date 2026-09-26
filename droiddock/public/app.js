@@ -403,7 +403,6 @@
         if (pairingOnly) {
           updatePairingControls();
           if (!$('pair-controls').hidden) $('pair-code').focus({ preventScroll: true });
-          refreshPairingEndpoint();
         }
         else ws.send(JSON.stringify({ type: 'connect' }));
         syncLockSubscription();
@@ -471,7 +470,19 @@
             if (message.device) $('device').textContent = typeof message.device === 'string' ? message.device : message.device.name || message.device.model || message.device.serial || 'Android phone';
             // The greeting describes the previous attempt, including a retained
             // cleanup error. Wait for this socket's connect result before failing.
-            if (message.snapshot === true) return;
+            if (message.snapshot === true) {
+              if (pairingOnly && !$('pair-controls').hidden && (message.state === 'idle' || message.state === 'error')) refreshPairingEndpoint();
+              return;
+            }
+            if (pairingOnly && !$('pair-controls').hidden && message.state === 'connecting') {
+              assignText($('pair-discovery-status'), 'Waiting for the previous phone connection to finish closing…');
+              return;
+            }
+            if (pairingOnly && !$('pair-controls').hidden && message.state === 'idle') {
+              setState('error', 'Follow the phone’s pairing steps in the panel.');
+              refreshPairingEndpoint();
+              return;
+            }
             if (message.state === 'error') {
               clearTimeout(connectionTimer);
               clearScreen();
@@ -885,6 +896,7 @@
   $('close-pair').addEventListener('click', () => closePair(true));
   $('pair-refresh').addEventListener('click', refreshPairingEndpoint);
   $('pair-cancel').addEventListener('click', () => {
+    const submitted = pairingAttempt;
     if (socket?.readyState === WebSocket.OPEN) {
       try {
         if (pairingAttempt) socket.send(JSON.stringify({ type: 'pairingCancel' }));
@@ -894,7 +906,9 @@
     pairingAttempt = false;
     pairingDiscoveryPending = false;
     $('pair-code').value = '';
-    assignText($('pair-status'), 'Pairing cancelled. Nothing else was sent.');
+    assignText($('pair-status'), submitted
+      ? 'Cancellation requested. Pairing may already have completed; check the phone before trying again.'
+      : 'Pairing entry cleared. No new request was sent.');
     updatePairingControls();
   });
   $('pair-form').addEventListener('submit', (event) => {

@@ -56,11 +56,30 @@ test('an initial server error can open guidance on a controller socket without s
   b.element('pair-toggle').handlers.click();
   const socket = b.sockets.at(-1);
   socket.onopen();
+  socket.receive({ type: 'status', state: 'error', snapshot: true });
   assert.equal(b.element('pair-code').disabled, false);
   assert.equal(b.element('pair-code').focused, true);
   assert.equal(socket.sent.some(item => item.type === 'connect'), false);
   assert.deepEqual(socket.sent.filter(item => item.type === 'pairingDiscovery'), [{ type: 'pairingDiscovery' }]);
   assert.deepEqual(writes, []);
+});
+
+test('previous connection cleanup cannot close a newly opened pairing panel', async () => {
+  const b = loadBrowser({
+    fetchImpl: async () => ({ ok: true, json: async () => ({ state: 'error', recovery: 'unknown', message: 'Connection unavailable.' }) }),
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  b.element('pair-toggle').handlers.click();
+  const socket = b.sockets.at(-1);
+  socket.onopen();
+  socket.receive({ type: 'status', state: 'connecting', snapshot: true });
+  socket.receive({ type: 'status', state: 'connecting', message: 'Disconnecting and cleaning up the phone connection…' });
+  assert.equal(b.element('pair-controls').hidden, false);
+  assert.equal(b.element('state').dataset.state, 'error');
+  assert.equal(socket.sent.some(item => item.type === 'pairingDiscovery'), false);
+  socket.receive({ type: 'status', state: 'idle' });
+  assert.equal(b.element('pair-controls').hidden, false);
+  assert.deepEqual(socket.sent.filter(item => item.type === 'pairingDiscovery'), [{ type: 'pairingDiscovery' }]);
 });
 
 test('invalid code and endpoint never leave the page; wrong and expired codes clear before retry', async () => {
@@ -149,6 +168,19 @@ test('hide, cancel, handoff and disconnect clear secrets and suppress stale pair
     assert.equal(socket.sent.length, before, 'late verification cannot reconnect');
     assert.ok(b.keyButtons.every(button => button.disabled));
   }
+});
+
+test('cancelling an in-flight pairing does not claim the submitted code was unsent', async () => {
+  const { b, socket } = await recovery();
+  b.element('pair-toggle').handlers.click();
+  b.element('pair-code').value = '123456';
+  b.element('pair-form').handlers.submit({ preventDefault() {} });
+  assert.deepEqual(socket.sent.at(-1), { type: 'pairingRequest', code: '123456' });
+  b.element('pair-cancel').handlers.click();
+  assert.deepEqual(socket.sent.at(-1), { type: 'pairingCancel' });
+  assert.match(b.element('pair-status').textContent, /may already have completed/i);
+  assert.match(b.element('pair-status').textContent, /check the phone/i);
+  assert.doesNotMatch(b.element('pair-status').textContent, /nothing.*sent/i);
 });
 
 test('endpoint refresh is explicit and a hidden panel never probes again', async () => {
