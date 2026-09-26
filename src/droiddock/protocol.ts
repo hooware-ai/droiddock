@@ -40,7 +40,7 @@ export class VideoParser {
   }
 }
 
-const KEYS: Record<string, number> = { home: 3, back: 4, recents: 187, volumeUp: 24, volumeDown: 25, power: 26, enter: 66, backspace: 67, tab: 61, up: 19, down: 20, left: 21, right: 22 };
+const KEYS: Record<string, number> = { home: 3, back: 4, recents: 187, volumeUp: 24, volumeDown: 25, power: 26, enter: 66, backspace: 67, tab: 61, up: 19, down: 20, left: 21, right: 22, paste: 279 };
 function integer(value: unknown, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new Error("Invalid input coordinate or action.");
   return value;
@@ -86,7 +86,8 @@ export function encodeControl(input: unknown): Buffer[] {
   }
   if (m.type === "touch") {
     const action = integer(m.action, 0, 2); const b = Buffer.alloc(32);
-    b[0] = 2; b[1] = action; b.writeBigUInt64BE(0n, 2);
+    const pointerId = m.pointerId === undefined ? 0 : integer(m.pointerId, 0, 2);
+    b[0] = 2; b[1] = action; b.writeBigUInt64BE(BigInt(pointerId), 2);
     position(m, b, 10); b.writeUInt16BE(action === 1 ? 0 : 65535, 22);
     return [b];
   }

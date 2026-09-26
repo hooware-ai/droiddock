@@ -27,8 +27,14 @@
   let pointer = null;
   let pendingMove = null;
   let moveAnimation = 0;
+  let mapZoom = false;
+  let zoomGesture = null;
+  let zoomWheelDelta = 0;
+  let lastZoomAt = 0;
   let connectionTimer = 0;
   let generation = 0;
+  let pasteCapability = null;
+  let filePasteController = null;
   let escapeSawFullscreen = false;
   let suppressEscapeBack = false;
   let suppressEscapeTimer = 0;
@@ -44,7 +50,10 @@
   }
 
   function setState(next, message = '') {
+    if (next !== 'connected' && state === 'connected') cancelZoom();
+    if (next === 'idle' || next === 'error' || next === 'moved') setMapZoom(false);
     state = next;
+    if (next !== 'connected') cancelFilePaste();
     const labels = { idle: 'Disconnected', connecting: 'Connecting', connected: 'Connected', moved: 'Opened elsewhere', error: 'Connection error' };
     const label = labels[next] || next;
     assignText($('state'), label);
@@ -98,6 +107,8 @@
     if (pinControlsDisabled !== disabled) {
       pinControlsDisabled = disabled;
       for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
+      $('map-zoom').disabled = disabled;
+      $('choose-file').disabled = disabled;
       if (disabled) clearPin();
     }
   }
@@ -253,6 +264,7 @@
   }
 
   function clearScreen() {
+    cancelZoom();
     releasePointer();
     resetDecoder();
     hasFrame = false;
@@ -265,6 +277,7 @@
 
   function fail(message) {
     clearTimeout(connectionTimer);
+    setMapZoom(false);
     const oldSocket = socket;
     socket = null;
     oldSocket?.close();
@@ -288,7 +301,10 @@
       fail('Live video needs WebCodecs. Open DroidDock in a current Chrome or Edge browser on localhost.');
       return;
     }
+    setMapZoom(false);
     const currentGeneration = ++generation;
+    pasteCapability = null;
+    cancelFilePaste();
     lockShown = false; lockState = 'unknown'; lockSuspended = false; lockSubscription = '';
     closePin(false);
     clearScreen();
@@ -311,14 +327,19 @@
           const message = JSON.parse(event.data);
           if (message.type === 'moved') {
             clearTimeout(connectionTimer);
+            setMapZoom(false);
             ++generation;
             socket = null;
+            pasteCapability = null;
+            cancelFilePaste();
             ws.close();
             clearScreen();
             setState('moved', 'Select Connect to bring your phone back here.');
             return;
           } else if (message.type === 'lockState') {
             receiveLockState(message);
+          } else if (message.type === 'pasteCapability') {
+            pasteCapability = typeof message.value === 'string' && /^[a-f0-9]{64}$/.test(message.value) ? message.value : null;
           } else if (message.type === 'status') {
             bindPinPreference(message);
             if (message.device) $('device').textContent = typeof message.device === 'string' ? message.device : message.device.name || message.device.model || message.device.serial || 'Android phone';
@@ -351,11 +372,14 @@
   }
 
   async function disconnect() {
+    setMapZoom(false);
     releasePointer();
     ++generation;
     clearTimeout(connectionTimer);
     const oldSocket = socket;
     socket = null;
+    pasteCapability = null;
+    cancelFilePaste();
     oldSocket?.close();
     clearScreen();
     $('device').textContent = 'Phone disconnected';
@@ -458,8 +482,57 @@
     if (canvas.hasPointerCapture(active.id)) canvas.releasePointerCapture(active.id);
   }
 
+  function cancelZoom() {
+    const active = zoomGesture;
+    if (!active) return;
+    zoomGesture = null;
+    clearTimeout(active.timer);
+    if (active.generation !== generation || !canControl()) return;
+    send({ type: 'touch', pointerId: 2, action: 1, ...active.second });
+    send({ type: 'touch', pointerId: 1, action: 1, ...active.first });
+  }
+
+  function setMapZoom(enabled) {
+    if (!enabled) cancelZoom();
+    mapZoom = enabled;
+    zoomWheelDelta = 0;
+    if (!enabled) lastZoomAt = 0;
+    $('map-zoom').setAttribute('aria-pressed', String(enabled));
+    $('map-zoom').title = enabled ? 'Map zoom mode on; wheel pinches the phone screen' : 'Map zoom mode off; wheel scrolls normally';
+  }
+
+  function startZoom(direction, anchor) {
+    if (zoomGesture || pointer !== null || anchor.width < 32 || anchor.height < 32) return;
+    const outer = Math.min(Math.max(8, Math.round(anchor.width * 0.12)), Math.floor((anchor.width - 1) / 2));
+    const inner = Math.max(2, Math.round(outer * 0.6));
+    const center = Math.max(outer, Math.min(anchor.width - outer - 1, anchor.x));
+    const startRadius = direction > 0 ? inner : outer;
+    const endRadius = direction > 0 ? outer : inner;
+    const point = (radius, side) => ({ x: center + side * radius, y: anchor.y, width: anchor.width, height: anchor.height });
+    const active = { generation, first: point(startRadius, -1), second: point(startRadius, 1), timer: 0 };
+    zoomGesture = active;
+    if (!send({ type: 'touch', pointerId: 1, action: 0, ...active.first }) ||
+        !send({ type: 'touch', pointerId: 2, action: 0, ...active.second })) { cancelZoom(); return; }
+    const move = (fraction) => {
+      if (zoomGesture !== active || active.generation !== generation || !mapZoom || !canControl() || document.hidden || !browserFocused) { cancelZoom(); return false; }
+      const radius = Math.round(startRadius + (endRadius - startRadius) * fraction);
+      active.first = point(radius, -1);
+      active.second = point(radius, 1);
+      if (!send({ type: 'touch', pointerId: 1, action: 2, ...active.first }) ||
+          !send({ type: 'touch', pointerId: 2, action: 2, ...active.second })) { cancelZoom(); return false; }
+      return true;
+    };
+    active.timer = setTimeout(() => {
+      if (!move(0.5)) return;
+      active.timer = setTimeout(() => {
+        if (!move(1)) return;
+        active.timer = setTimeout(cancelZoom, 30);
+      }, 30);
+    }, 30);
+  }
+
   canvas.addEventListener('pointerdown', (event) => {
-    if (!canControl() || pointer !== null || event.button !== 0) return;
+    if (!canControl() || pointer !== null || zoomGesture || event.button !== 0) return;
     event.preventDefault();
     canvas.focus({ preventScroll: true });
     pointer = { id: event.pointerId, last: coordinates(event) };
@@ -475,23 +548,80 @@
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('lostpointercapture', releasePointer);
-  window.addEventListener('blur', () => releasePointer());
+  window.addEventListener('blur', () => { cancelZoom(); releasePointer(); });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('wheel', (event) => {
     if (!canControl()) return;
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
+    if (mapZoom) {
+      if (pointer !== null || zoomGesture || !browserFocused || document.hidden || !Number.isFinite(event.deltaY * unit)) return;
+      zoomWheelDelta = Math.max(-240, Math.min(240, zoomWheelDelta + event.deltaY * unit));
+      if (Math.abs(zoomWheelDelta) < 60 || Date.now() - lastZoomAt < 120) return;
+      const direction = zoomWheelDelta < 0 ? 1 : -1;
+      zoomWheelDelta = 0;
+      lastZoomAt = Date.now();
+      startZoom(direction, coordinates(event));
+      return;
+    }
     send({ type: 'scroll', ...coordinates(event), dx: Math.max(-1, Math.min(1, -event.deltaX * unit / 100)), dy: Math.max(-1, Math.min(1, -event.deltaY * unit / 100)) });
   }, { passive: false });
   const keyboardKeys = { Escape: 'back', Home: 'home', Enter: 'enter', Backspace: 'backspace', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  const maxPasteFileBytes = 16 * 1024 * 1024;
+  function cancelFilePaste() {
+    filePasteController?.abort();
+    filePasteController = null;
+  }
+  async function pasteFile(file) {
+    if (!canControl() || !pasteCapability) return;
+    if (filePasteController) {
+      $('message').textContent = 'Another file paste is still running.';
+      return;
+    }
+    if (!file || !file.size || file.size > maxPasteFileBytes) {
+      $('message').textContent = 'Paste one nonempty file up to 16 MiB.';
+      $('message').classList.add('error');
+      return;
+    }
+    const controller = new AbortController();
+    const startedIn = generation;
+    filePasteController = controller;
+    $('message').textContent = 'Sending file to the focused phone app…';
+    $('message').classList.remove('error');
+    try {
+      const response = await fetch('/api/paste-file', {
+        method: 'POST', signal: controller.signal, body: file,
+        headers: { 'x-droiddock': '1', 'x-paste-capability': pasteCapability, 'content-type': file.type || 'application/octet-stream' },
+      });
+      const result = await response.json();
+      if (startedIn !== generation || controller.signal.aborted || !canControl()) return;
+      $('message').textContent = response.ok ? result.message : result.error || 'The phone could not paste this file.';
+      $('message').classList.toggle('error', !response.ok);
+    } catch {
+      if (startedIn === generation && !controller.signal.aborted) {
+        $('message').textContent = 'File paste could not finish. Check the phone and try again.';
+        $('message').classList.add('error');
+      }
+    } finally {
+      if (filePasteController === controller) filePasteController = null;
+    }
+  }
   canvas.addEventListener('paste', (event) => {
     // Read only the text supplied by the user's paste gesture, never poll or
     // request background access to the system clipboard.
     event.preventDefault();
     if (!canControl()) return;
+    const files = [...(event.clipboardData?.files || [])];
+    if (files.length) {
+      if (files.length !== 1) {
+        $('message').textContent = 'Paste one file at a time.';
+        $('message').classList.add('error');
+      } else void pasteFile(files[0]);
+      return;
+    }
     const text = event.clipboardData?.getData('text/plain');
     if (!text) {
-      $('message').textContent = 'Copy some text first. Image and file pastes are not supported.';
+      $('message').textContent = 'The browser did not provide text or a file. Use Paste file to choose a file.';
       $('message').classList.add('error');
       return;
     }
@@ -504,6 +634,12 @@
       $('message').textContent = 'Paste sent to the phone’s focused field.';
       $('message').classList.remove('error');
     }
+  });
+  $('choose-file').addEventListener('click', () => $('file-input').click());
+  $('file-input').addEventListener('change', () => {
+    const file = $('file-input').files?.[0];
+    $('file-input').value = '';
+    if (file) void pasteFile(file);
   });
   function closeHelpControls() {
     const panel = $('help-controls');
@@ -610,6 +746,7 @@
     closeHelpControls();
   });
   window.addEventListener('blur', () => { browserFocused = false; closePin(false); syncLockSubscription(); });
+  $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
   window.addEventListener('pagehide', () => { closePin(false); disconnect(); });
   $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
@@ -653,7 +790,7 @@
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { releasePointer(); closePin(false); }
+    if (document.hidden) { cancelZoom(); releasePointer(); closePin(false); }
     syncLockSubscription();
   });
   fetch('/api/status').then((response) => {

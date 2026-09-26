@@ -37,11 +37,12 @@ Set this up — https://github.com/hooware-ai/droiddock
 ## What you can do
 
 - Tap, drag, long-press, and scroll directly on the phone video.
+- Turn on **Map zoom mode** in the control rail to make the mouse wheel pinch-zoom around the pointer in Android maps that support two-finger gestures. Wheel up zooms in; wheel down zooms out. Turn the mode off for ordinary phone scrolling. The mode clears on disconnect or controller handoff.
 - Use Back, Home, Recents, volume, and power controls in the side rail.
 - Select **Enter fullscreen** to enlarge the phone and those controls together when the browser Fullscreen API is available. **Exit fullscreen** or Escape returns to the ordinary view. Embedded browsers may decline the request; the windowed dock stays usable.
 - Open **Help** on the side rail for in-app notes on keyboard, pointer, paste, and fallback text. Help stays available while disconnected and does not send phone input. Keyboard users can open or close it and return focus to that control.
 - Focus the screen for keyboard input, including Backspace, Enter, and arrows. Tab navigation and browser shortcuts remain in the browser. Press **Escape** to close Help, then the details panel; with those panels closed and the screen focused, Escape sends Back to the phone. Escape that exits fullscreen does not send Back.
-- Press **Ctrl+V** over the focused phone screen to paste plain text. Unicode, emoji, and multiline text are supported when the Android app accepts them, up to 64 KiB of UTF-8 text. Paste changes the phone clipboard; images and files are not supported.
+- Press **Ctrl+V** over the focused phone screen to paste plain text, one image, or one file. Text supports Unicode, emoji, and multiple lines up to 64 KiB of UTF-8. Images and files up to 16 MiB require the optional [Android paste helper](docs/SETUP.md#optional-direct-image-and-file-paste); the focused app must accept Android rich-content paste. Use **Paste file** in Details when the browser does not supply a copied file.
 - Open the three-dot panel for device details and fallback text input. That input uses scrcpy text injection, supports ASCII and some accented letters, and is limited to 300 UTF-8 bytes per send. A live `N / 300 bytes` counter uses the same UTF-8 check as Send; over-limit text stays in the field so it can be shortened.
 - Use the **PIN** button on the control rail for a masked, manually sent numeric PIN (1 to 64 digits). Open the phone prompt first; **Send digits** uses Android digit keys, while **Backspace on phone** and **Enter on phone** are separate actions. Some phones auto-submit the last digit. The picture may stay black on protected screens, and some prompts reject remote input. Use the physical phone when needed. No automatic retries, clipboard transfer, or saved PIN; the field clears after sending, panel closure, window focus loss, or connection loss. This does not provide remote biometrics or Windows Hello authentication.
 - Optional **Automatically show PIN entry when my phone is locked** opens the same panel on an awake, unobscured phone lock screen, without moving keyboard focus. It is off by default and remembered per browser installation and phone configuration; blocked browser storage falls back to this session. Lock state is an unlock aid, not proof that a numeric PIN keypad is ready. Confirm the phone field before sending. Dismissing the panel suppresses automatic reopening until an observed unlock or reconnection; sleep, an obscured lock screen, unavailable detection, or leaving the browser closes and clears it. Manual PIN entry remains available when detection is unsupported.
@@ -50,7 +51,7 @@ Set this up — https://github.com/hooware-ai/droiddock
 
 Rotation resets the decoder for the new video dimensions. After a Wi-Fi interruption, restore connectivity and reconnect. Current stream settings are a maximum dimension of 1280 pixels, up to 60 fps, and 6 Mbps H.264; these are encoder settings, not performance guarantees.
 
-Audio, recording, file transfer, multitouch, and automatic clipboard synchronization are **not implemented**. See the [roadmap](docs/ROADMAP.md) for proposed work.
+Audio, recording, general file transfer, general multitouch input, and automatic clipboard synchronization are **not implemented**. Map zoom mode provides a limited synthetic two-finger gesture. Explicit image/file paste is limited to apps that accept Android rich content; it is not a general attachment mechanism. See the [roadmap](docs/ROADMAP.md) for proposed work.
 
 ## Local by design
 

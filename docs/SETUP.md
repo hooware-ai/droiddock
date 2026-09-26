@@ -56,6 +56,18 @@ DroidDock discovers the paired phone's advertised connection endpoint by its per
 
 The pairing port and connection port differ and can change. Neither is the device identity. Rerun setup after connection. If pairing expires, repeat pairing with a fresh code. Do not restart shared ADB or disturb other devices to recover one phone.
 
+## Optional direct image and file paste
+
+Direct paste into a compatible focused Android app requires a small, optional DroidDock Android helper. Install it on the **configured phone** after normal setup. You need JDK 17 or newer and Android SDK platform 36 for the one-time build; the checked-in Gradle wrapper pins the build tool and verifies its download checksum. The helper is a debuggable local build because the bridge copies each explicitly pasted file into its private storage with Android's `run-as` command. It has no launcher screen and does not run a background service.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Install-PasteHelper.ps1
+```
+
+The script uses the same `DROIDDOCK_DEVICE_SERIAL` and `DROIDDOCK_ADB` environment overrides as the running app, then verifies that permanent phone identity before installation. Reinstall the helper after changing phones. In DroidDock, focus the phone screen and press Ctrl+V with one copied image/file, or choose **Paste file** in Details. The browser sends only that selected item, up to 16 MiB, to the local bridge. The bridge stages it temporarily, verifies the session's phone identity, copies it to helper-private storage, sets an Android content-URI clipboard item, and requests Android Paste in the currently focused app. A failed device-side cleanup remains pending in the running service and is retried on the verified phone before reconnecting. The browser reports when the paste gesture was sent, not whether the target app accepted it. If nothing appears, use that app's own attachment control. Ordinary text paste does not need this helper.
+
+Android apps must implement rich-content receiving for a direct image/file paste to work. No manufacturer-specific branch is used, but other phones and target apps remain unverified. An explicitly pasted item replaces the phone clipboard; the helper retains up to four recent items and removes older items on a later paste. Uninstalling the helper removes its private files. No automatic clipboard watching or synchronization is enabled.
+
 ## Configuration and launch
 
 `config.local.json` is ignored by Git; [config.example.json](../config.example.json) shows its shape. It contains `deviceSerial`, optional `deviceName`, `adb`, and `port`. Use a generic device name if diagnostic output might be shared.
