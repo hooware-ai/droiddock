@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>DroidDock</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
@@ -126,6 +126,7 @@
           <summary class="icon-button" aria-label="Details and text input" title="Details and text input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></summary>
           <div class="details-panel">
             <strong>DroidDock</strong><span class="powered">powered by scrcpy</span>
+            <fieldset class="appearance"><legend>Appearance</legend><div class="appearance-options"><label><input id="theme-system" type="radio" name="theme" value="system" aria-label="System theme" checked> System</label><label><input id="theme-light" type="radio" name="theme" value="light" aria-label="Light theme"> Light</label><label><input id="theme-dark" type="radio" name="theme" value="dark" aria-label="Dark theme"> Dark</label></div></fieldset>
             <div class="session-info"><span id="device">Phone disconnected</span><span id="resolution"></span></div>
             <form id="text-form" class="text-form"><label for="text-input">Fallback text input</label><input id="text-input" type="text" placeholder="Text to send to phone" maxlength="3000" autocomplete="off" disabled aria-describedby="text-input-help text-byte-count"><p id="text-byte-count" class="text-byte-count">0 / 300 bytes</p><p id="text-input-help" class="text-help">Limited to 300 UTF-8 bytes per send. Fallback injection supports ASCII and some accented letters, not every Unicode character.</p><button id="send-text" type="submit" disabled>Send</button></form>
             <div class="file-paste"><button id="choose-file" type="button" aria-label="Paste file" disabled>Paste file</button><input id="file-input" type="file" hidden aria-label="Choose one file to paste"><p class="text-help">Sends one file to the focused Android app when it supports rich paste. Maximum 16 MiB.</p></div>
