@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
-import { ScrcpySession } from "./session.js";
+import { ScrcpySession, type RecoveryHint } from "./session.js";
 import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
@@ -20,6 +20,7 @@ const authority = `127.0.0.1:${port}`;
 const origin = `http://${authority}`;
 type State = "idle" | "connecting" | "connected" | "error";
 let state: State = "idle", message = "Ready to connect your phone.";
+let recovery: RecoveryHint = "unknown";
 let client: WebSocket | undefined;
 let session: ScrcpySession | undefined;
 let abort: AbortController | undefined;
@@ -45,10 +46,16 @@ function startupTimeoutMs(): number {
   const value = Number(process.env.DROIDDOCK_STARTUP_TIMEOUT_MS);
   return Number.isInteger(value) && value >= 50 && value <= 120000 ? value : 35000;
 }
-function status() { return { app: "DroidDock", type: "status", state, message, device: config.deviceName, version: SCRCPY_VERSION, packets: packetCount, installationId, configurationId, handoff: true }; }
+function recoveryFrom(error: unknown): RecoveryHint {
+  if (error instanceof Error && error.name === "PhoneDiscoveryError" && "recovery" in error &&
+      (error.recovery === "candidate" || error.recovery === "unknown")) return error.recovery;
+  return "unknown";
+}
+function status() { return { app: "DroidDock", type: "status", state, message, recovery, device: config.deviceName, version: SCRCPY_VERSION, packets: packetCount, installationId, configurationId, handoff: true }; }
 function send(value: unknown) { if (client?.readyState === WebSocket.OPEN) client.send(JSON.stringify(value)); }
 function setState(next: State, detail: string) {
   if (state === next && message === detail) return;
+  if (next === "connected") recovery = "not-needed";
   if (next !== "connected") lockMonitor.connected();
   else if (state !== "connected" && session) {
     const current = session;
@@ -66,8 +73,9 @@ async function cleanup(): Promise<void> {
     catch { /* Retain only this session's resources for a later bounded retry. */ }
   }
 }
-function stop(next: State = "idle", detail = "Disconnected. Connect when you're ready."): Promise<void> {
+function stop(next: State = "idle", detail = "Disconnected. Connect when you're ready.", hint: RecoveryHint = "unknown"): Promise<void> {
   const intent = ++connectionIntent;
+  recovery = hint;
   pasteAbort?.abort();
   const old = session, oldPending = pending;
   if (old) cleanupSessions.add(old);
@@ -96,6 +104,7 @@ async function connect(): Promise<void> {
     if (cleanupSessions.size) { setState("error", cleanupMessage); return; }
   }
   packetCount = 0;
+  recovery = "unknown";
   setState("connecting", "Finding the configured phone…");
   abort = new AbortController();
   const current = new ScrcpySession(root, event => {
@@ -118,7 +127,8 @@ async function connect(): Promise<void> {
   pending = current.start(abort.signal).catch(error => {
     if (session === current) {
       const detail = error instanceof Error ? error.message : "Could not connect to the phone. Check the phone connection and local tool installation.";
-      void stop("error", detail.includes("could not be reached") ? "Your phone is unreachable. Check Wi-Fi and enable Wireless debugging on the phone, then reconnect." : detail.slice(0, 600));
+      const hint = recoveryFrom(error);
+      void stop("error", error instanceof Error && error.name === "PhoneDiscoveryError" ? detail : detail.includes("could not be reached") ? "Your phone is unreachable. Check Wi-Fi and enable Wireless debugging on the phone, then reconnect." : detail.slice(0, 600), hint);
     }
   });
 }
