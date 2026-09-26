@@ -37,7 +37,7 @@ Set this up — https://github.com/hooware-ai/droiddock
 ## What you can do
 
 - Tap, drag, long-press, and scroll directly on the phone video.
-- Turn on **Map zoom mode** in the control rail to make the mouse wheel pinch-zoom around the pointer in Android maps that support two-finger gestures. Wheel up zooms in; wheel down zooms out. Turn the mode off for ordinary phone scrolling. The mode clears on disconnect or controller handoff.
+- Hold **Left Ctrl** while wheeling over the live phone screen for temporary pinch-zoom around the pointer in Android maps that support two-finger gestures. Wheel up zooms in; wheel down zooms out. Release the key for ordinary phone scrolling. Alternatively, turn on **Map zoom mode** in the control rail to zoom without holding a key. The mode clears on disconnect or controller handoff. The temporary shortcut is active only after the browser receives a Left Ctrl keydown, so refocus the browser and press it again if necessary; touchpad pinch gestures alone do not activate it.
 - Use Back, Home, Recents, volume, and power controls in the side rail.
 - Select **Enter fullscreen** to enlarge the phone and those controls together when the browser Fullscreen API is available. **Exit fullscreen** or Escape returns to the ordinary view. Embedded browsers may decline the request; the windowed dock stays usable.
 - Open **Help** on the side rail for in-app notes on keyboard, pointer, paste, and fallback text. Help stays available while disconnected and does not send phone input. Keyboard users can open or close it and return focus to that control.
