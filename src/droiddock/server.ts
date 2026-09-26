@@ -9,6 +9,7 @@ import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
 import { HostPasteCleanup, pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
+import { pairConfiguredPhone, parsePairingRequest, type PairingRequest, type PairingResult } from "./pairing.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const installationId = createHash("sha256").update(resolve(root).toLowerCase()).digest("hex").slice(0, 16);
@@ -32,6 +33,9 @@ let shuttingDown = false;
 let connectionIntent = 0;
 let pasteCapability: string | undefined;
 let pasteAbort: AbortController | undefined;
+let pairingAbort: AbortController | undefined;
+let pairingPending: Promise<void> | undefined;
+let pairingOwner: WebSocket | undefined;
 const hostPasteCleanup = new HostPasteCleanup();
 const cleanupSessions = new Set<ScrcpySession>();
 const cleanupMessage = "Phone cleanup could not be confirmed. Restore the phone connection and select Connect to retry cleanup.";
@@ -53,6 +57,35 @@ function recoveryFrom(error: unknown): RecoveryHint {
 }
 function status() { return { app: "DroidDock", type: "status", state, message, recovery, device: config.deviceName, version: SCRCPY_VERSION, packets: packetCount, installationId, configurationId, handoff: true }; }
 function send(value: unknown) { if (client?.readyState === WebSocket.OPEN) client.send(JSON.stringify(value)); }
+type PairingOutcome = PairingResult | "busy" | "cancelled" | "paired-unverified" | "identity-verified";
+function sendPairing(owner: WebSocket, result: PairingOutcome) {
+  if (client === owner && owner.readyState === WebSocket.OPEN) owner.send(JSON.stringify({ type: "pairingResult", result }));
+}
+function beginPairing(owner: WebSocket, request: PairingRequest): void {
+  if (pairingPending) { sendPairing(owner, "busy"); return; }
+  if (shuttingDown || state !== "error" || session || cleanupSessions.size) { sendPairing(owner, "unavailable"); return; }
+  const intent = connectionIntent;
+  const controller = new AbortController();
+  pairingAbort = controller;
+  pairingOwner = owner;
+  const current = () => client === owner && connectionIntent === intent && pairingAbort === controller && !controller.signal.aborted;
+  const work = (async () => {
+    try {
+      const result = await pairConfiguredPhone(config.adb, config.deviceSerial, { ...request, signal: controller.signal });
+      if (!current()) return;
+      if (result !== "paired") { sendPairing(owner, result); return; }
+      try { await ScrcpySession.verifyConfiguredPhone(root, controller.signal); }
+      catch { if (current()) sendPairing(owner, "paired-unverified"); return; }
+      if (current()) sendPairing(owner, "identity-verified");
+    } catch { if (current()) sendPairing(owner, "unavailable"); }
+  })();
+  pairingPending = work;
+  void work.then(() => {
+    if (pairingPending === work) pairingPending = undefined;
+    if (pairingAbort === controller) pairingAbort = undefined;
+    if (pairingOwner === owner) pairingOwner = undefined;
+  });
+}
 function setState(next: State, detail: string) {
   if (state === next && message === detail) return;
   if (next === "connected") recovery = "not-needed";
@@ -76,6 +109,8 @@ async function cleanup(): Promise<void> {
 function stop(next: State = "idle", detail = "Disconnected. Connect when you're ready.", hint: RecoveryHint = "unknown"): Promise<void> {
   const intent = ++connectionIntent;
   recovery = hint;
+  const oldPairing = pairingPending;
+  pairingAbort?.abort();
   pasteAbort?.abort();
   const old = session, oldPending = pending;
   if (old) cleanupSessions.add(old);
@@ -85,6 +120,7 @@ function stop(next: State = "idle", detail = "Disconnected. Connect when you're 
   if (cleanupSessions.size || oldPending) setState("connecting", "Disconnecting and cleaning up the phone connection…");
   else setState(next, detail);
   stopping = stopping.then(async () => {
+    await oldPairing?.catch(() => {});
     // Let any in-flight ADB allocation settle before removing this session's resources.
     await oldPending?.catch(() => {});
     await cleanup();
@@ -94,6 +130,8 @@ function stop(next: State = "idle", detail = "Disconnected. Connect when you're 
 }
 async function connect(): Promise<void> {
   const intent = connectionIntent;
+  pairingAbort?.abort();
+  await pairingPending?.catch(() => {});
   await stopping;
   if (intent !== connectionIntent || shuttingDown || session || !client || client.readyState !== WebSocket.OPEN) return;
   if (cleanupSessions.size) {
@@ -256,6 +294,19 @@ sockets.on("connection", (ws: WebSocket) => {
       const input = JSON.parse(data.toString());
       if (input?.type === "connect") { void connect(); return; }
       if (input?.type === "disconnect") { void stop(); return; }
+      if (input?.type === "pairingRequest") {
+        const request = parsePairingRequest(input);
+        if (!request) throw new Error("Invalid pairing request.");
+        beginPairing(ws, request);
+        return;
+      }
+      if (input?.type === "pairingCancel") {
+        if (Object.keys(input).length !== 1) throw new Error("Invalid pairing cancellation.");
+        if (pairingOwner !== ws || !pairingAbort || pairingAbort.signal.aborted) { sendPairing(ws, "unavailable"); return; }
+        pairingAbort.abort();
+        sendPairing(ws, "cancelled");
+        return;
+      }
       if (input?.type === "lockSubscription") {
         if (typeof input.enabled !== "boolean" || typeof input.visible !== "boolean" ||
             Object.keys(input).some(key => !["type", "enabled", "visible"].includes(key))) throw new Error("Invalid lock-state subscription.");

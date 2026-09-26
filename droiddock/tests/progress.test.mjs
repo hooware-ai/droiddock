@@ -104,9 +104,10 @@ test('synthetic startup gates report stages in order and only for the current se
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
+    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'pairing.js']) {
       await copyFile(join('dist/droiddock', name), join(fixtureDist, name));
     }
+    await copyFile('dist/process.js', join(fixture, 'dist/process.js'));
     await writeFile(join(fixtureDist, 'session.js'), `
       import { access, appendFile } from 'node:fs/promises';
       import { join } from 'node:path';

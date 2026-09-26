@@ -53,8 +53,8 @@ export class ScrcpySession {
   private check(signal: AbortSignal) { signal.throwIfAborted(); if (this.closed) throw new Error("Session closed."); }
   private progress(message: ConnectionProgressMessage) { if (!this.closed) this.onProgress(message); }
   private command(args: string[], timeoutMs = 8000) { return runChecked(this.adb, ["-s", this.transport, ...args], { timeoutMs }); }
-  private async findTransport(identityTimeout = 8000, signal?: AbortSignal, reportRecovery = false): Promise<string> {
-    const args = ["-NoProfile", "-File", join(this.root, "scripts/Find-DroidDockDevice.ps1"), "-DeviceSerial", this.serial, "-AdbPath", this.adb, "-WaitSeconds", "15"];
+  private static async resolveTransport(root: string, adb: string, serial: string, identityTimeout: number, signal?: AbortSignal, reportRecovery = false): Promise<string> {
+    const args = ["-NoProfile", "-File", join(root, "scripts/Find-DroidDockDevice.ps1"), "-DeviceSerial", serial, "-AdbPath", adb, "-WaitSeconds", "15"];
     if (reportRecovery) args.push("-ReportRecovery");
     const found = await runChecked("pwsh", args, { timeoutMs: 20000, signal });
     let transport = found.stdout.trim();
@@ -69,9 +69,16 @@ export class ScrcpySession {
       transport = report.transport;
     }
     if (!transport || /\s/.test(transport)) throw new Error("Phone discovery returned an invalid transport.");
-    const identity = await runChecked(this.adb, ["-s", transport, "shell", "getprop", "ro.serialno"], { timeoutMs: identityTimeout, signal });
-    if (identity.stdout.trim() !== this.serial) throw new Error("The connected device is not the configured phone.");
+    const identity = await runChecked(adb, ["-s", transport, "shell", "getprop", "ro.serialno"], { timeoutMs: identityTimeout, signal });
+    if (identity.stdout.trim() !== serial) throw new Error("The connected device is not the configured phone.");
     return transport;
+  }
+  private findTransport(identityTimeout = 8000, signal?: AbortSignal, reportRecovery = false): Promise<string> {
+    return ScrcpySession.resolveTransport(this.root, this.adb, this.serial, identityTimeout, signal, reportRecovery);
+  }
+  static async verifyConfiguredPhone(root: string, signal: AbortSignal): Promise<void> {
+    if (!/^[A-Za-z0-9]+$/.test(config.deviceSerial)) throw new Error("Invalid configured phone.");
+    await ScrcpySession.resolveTransport(root, config.adb, config.deviceSerial, 3000, signal);
   }
   private async cleanupTransport(): Promise<void> {
     try {

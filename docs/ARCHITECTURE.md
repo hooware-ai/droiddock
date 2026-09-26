@@ -52,6 +52,8 @@ Installation and configuration identifiers let helpers distinguish a service for
 
 The service uses `127.0.0.1`, Host/Origin validation, custom-header control POSTs, an asset allowlist, and CSP. WebSockets require the exact local Origin. Browser connect/disconnect actions are bound to the owning socket; helper HTTP actions follow their separate guarded path. Read the actual request handlers before modifying this distinction.
 
+Pairing uses only that owning WebSocket. A strict `pairingRequest` carries a six-digit code and optional validated IPv4 endpoint; `pairingCancel` stops the one active attempt. Handoff, disconnect, new Connect, and shutdown cancel it and suppress stale results. After ADB reports success, ordinary discovery checks the configured permanent phone identity before an `identity-verified` result. That result does not assert video readiness; a subsequent Connect must render a frame. The browser form remains future work. See [the pairing contract](PAIRING-HELPER.md).
+
 Structured controls validate sizes and ranges before serialization. Explicit paste is capped at 65,536 UTF-8 bytes; fallback text injection is capped at 300. The WebSocket payload allowance accounts for JSON escaping. Slow browser delivery and congested control output trigger bounded failure instead of unlimited buffering.
 
 These checks constrain browser behavior but do not protect against hostile local processes that can construct their own requests. See [SECURITY.md](../SECURITY.md).
