@@ -19,13 +19,14 @@ async function until(check) {
 }
 
 // All sessions are file-gated stubs. These tests never discover or control devices.
-async function fixture(t, implementation) {
+async function fixture(t, implementation, filePasteImplementation) {
   const base = resolve('.setup');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'security-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  if (filePasteImplementation) await writeFile(join(folder, 'file-paste.js'), filePasteImplementation);
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(folder, 'session.js'), implementation);
   const reservation = createServer();
@@ -97,6 +98,60 @@ test('malformed controls never echo JSON parser excerpts', { timeout: 10000 }, a
   const error = await until(() => bridge.messages.find(message => message.type === 'inputError'));
   assert.equal(error.message, 'Invalid JSON control message.');
   assert.doesNotMatch(JSON.stringify(bridge.messages), /SYNTHETIC_PRIVATE/);
+});
+
+test('rich paste requires current controller capability and releases the host staging file', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    import { readFile, writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    export class ScrcpySession {
+      constructor(root, onEvent) { Object.assign(this, { root, onEvent }); }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      async pasteFile(path, mime) {
+        const data = await readFile(path);
+        await writeFile(join(this.root, 'paste-result.json'), JSON.stringify({ path, mime, bytes:[...data] }));
+      }
+      async stop() {}
+    }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  const token = await until(() => bridge.messages.find(message => message.type === 'pasteCapability')?.value);
+  const url = `${bridge.origin}/api/paste-file`;
+  const headers = { origin: bridge.origin, 'x-droiddock': '1', 'x-paste-capability': token, 'content-type': 'image/png' };
+  assert.equal((await fetch(url, { method:'POST', headers: { ...headers, 'x-paste-capability':'0'.repeat(64) }, body:Buffer.from([1]) })).status, 403);
+  assert.equal((await fetch(url, { method:'POST', headers, body:Buffer.from([1, 2, 3]) })).status, 200);
+  const result = JSON.parse(await readFile(join(bridge.root, 'paste-result.json'), 'utf8'));
+  assert.equal(result.mime, 'image/png');
+  assert.deepEqual(result.bytes, [1, 2, 3]);
+  await assert.rejects(readFile(result.path));
+});
+
+test('cleanup retry reserves paste ownership before concurrent HTTP requests', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    export class ScrcpySession {
+      constructor(root, onEvent) { this.onEvent = onEvent; }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      async pasteFile() { return false; }
+      async stop() {}
+    }
+  `, `
+    export class PasteFileError extends Error { constructor(message, status) { super(message); this.status = status; } }
+    export class HostPasteCleanup {
+      pending = true;
+      track() {}
+      async retry() { await new Promise(done => setTimeout(done, 50)); this.pending = false; return true; }
+    }
+    export function pasteMime() { return 'image/png'; }
+    export async function stagePasteFile(req) { for await (const chunk of req) {} return 'SYNTHETIC'; }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  const token = await until(() => bridge.messages.find(message => message.type === 'pasteCapability')?.value);
+  const headers = { origin: bridge.origin, 'x-droiddock': '1', 'x-paste-capability': token, 'content-type': 'image/png' };
+  const url = `${bridge.origin}/api/paste-file`;
+  const statuses = await Promise.all([1, 2].map(() => fetch(url, { method:'POST', headers, body:Buffer.from([1]) }).then(response => response.status)));
+  assert.deepEqual(statuses.sort(), [200, 409]);
 });
 
 test('only the initial error greeting is marked as a snapshot, never current attempt failures', { timeout: 10000 }, async t => {
@@ -193,7 +248,7 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
     import { setTimeout as delay } from 'node:timers/promises';
     export const state = {
       calls:[], forward:'', oldIdentity:null, newIdentity:'SYNTHETICPHONE', discovery:'NEW',
-      failRemove:false, failRm:false, allocationTimeout:false,
+      failRemove:false, failRm:false, failPrivateRm:false, failBroadcast:false, allocationTimeout:false,
       hold:Object.assign(Object.create(null), ${JSON.stringify(defaultHold)}),
       waiters:Object.create(null), released:Object.create(null),
     };
@@ -225,6 +280,12 @@ function syntheticProcessModule({ commandLog, releaseDir, consumeRelease = false
         const identity = transport === 'OLD' ? state.oldIdentity : state.newIdentity;
         if (!identity) throw new Error('SYNTHETIC_PRIVATE_OFFLINE');
         return {stdout:identity};
+      }
+      if (args[2] === 'shell' && args[3] === 'pm' && args[4] === 'path') return {stdout:'package:/synthetic/helper.apk'};
+      if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'broadcast') return {stdout:'Broadcast completed: result=' + (state.failBroadcast ? '0' : '1')};
+      if (args[2] === 'shell' && args[3] === 'run-as') {
+        if (args[5] === 'rm' && state.failPrivateRm) throw new Error('SYNTHETIC_PRIVATE_HELPER_FILE_ERROR');
+        return {stdout:''};
       }
       if (args[2] === 'forward' && args[3] === '--remove') {
         if (state.failRemove) throw new Error('SYNTHETIC_PRIVATE_FORWARD_ERROR');
@@ -279,7 +340,7 @@ async function startupBridge(t) {
   const root = await mkdtemp(join(base, 'startup-cancel-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js']) {
+  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule({
@@ -593,4 +654,47 @@ test('lock reads use only the verified session transport and bounded cancellable
   session.closed = true;
   assert.equal(await session.readLockState(controller.signal), 'unknown');
   assert.equal(state.calls.length, 1);
+});
+
+test('failed paste staging cleanup survives disconnect and retries on the verified phone', async t => {
+  const { session, state } = await sessionFixture(t);
+  state.oldIdentity = 'SYNTHETICPHONE';
+  session.transport = 'OLD';
+  session.control = { destroyed:false, writableLength:0, write() {}, destroy() { this.destroyed = true; } };
+  state.failRm = true;
+  assert.equal(await session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), true,
+    'successful delivery reports its unconfirmed cleanup');
+  assert.equal(session.pasteCleanup.size, 1, 'failed transfer cleanup remains owned by session');
+  const [id] = session.pasteCleanup.keys();
+  const pushes = state.calls.filter(call => call.args.includes('push')).length;
+  await assert.rejects(session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), /cleanup could not be confirmed/i);
+  assert.equal(state.calls.filter(call => call.args.includes('push')).length, pushes,
+    'a second upload cannot begin while device cleanup is unresolved');
+  state.oldIdentity = null;
+  await assert.rejects(session.stop(), /cleanup could not be confirmed/i);
+  assert.equal(session.pasteCleanup.size, 1, 'disconnect cannot forget a device file');
+  state.failRm = false;
+  await session.stop();
+  assert.equal(session.pasteCleanup.size, 0);
+  assert.ok(state.calls.some(call => call.args.join(' ') === `-s NEW shell rm -f /data/local/tmp/droiddock-paste-${id}`));
+});
+
+test('partial helper-private paste file is retained for verified cleanup retry', async t => {
+  const { session, state } = await sessionFixture(t);
+  state.oldIdentity = 'SYNTHETICPHONE';
+  session.transport = 'OLD';
+  session.control = { destroyed:false, writableLength:0, write() {}, destroy() { this.destroyed = true; } };
+  state.failBroadcast = true;
+  state.failPrivateRm = true;
+  await assert.rejects(session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), /prepare rich clipboard/i);
+  assert.equal(session.pasteCleanup.size, 1);
+  const [id, pending] = session.pasteCleanup.entries().next().value;
+  assert.equal(pending.remote, false);
+  assert.equal(pending.privateFile, true);
+  state.oldIdentity = null;
+  await assert.rejects(session.stop(), /cleanup could not be confirmed/i);
+  state.failPrivateRm = false;
+  await session.stop();
+  assert.equal(session.pasteCleanup.size, 0);
+  assert.ok(state.calls.some(call => call.args.join(' ') === `-s NEW shell run-as ai.hooware.droiddock.paste rm -f files/paste/${id}`));
 });

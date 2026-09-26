@@ -40,7 +40,7 @@ export class VideoParser {
   }
 }
 
-const KEYS: Record<string, number> = { home: 3, back: 4, recents: 187, volumeUp: 24, volumeDown: 25, power: 26, enter: 66, backspace: 67, tab: 61, up: 19, down: 20, left: 21, right: 22 };
+const KEYS: Record<string, number> = { home: 3, back: 4, recents: 187, volumeUp: 24, volumeDown: 25, power: 26, enter: 66, backspace: 67, tab: 61, up: 19, down: 20, left: 21, right: 22, paste: 279 };
 function integer(value: unknown, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new Error("Invalid input coordinate or action.");
   return value;

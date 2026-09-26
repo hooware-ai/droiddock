@@ -13,3 +13,7 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+android/paste-helper/.gradle/
+android/paste-helper/build/
+android/paste-helper/test-target/build/
+android/paste-helper/local.properties
