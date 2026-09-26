@@ -37,6 +37,7 @@ Set this up — https://github.com/hooware-ai/droiddock
 ## What you can do
 
 - Tap, drag, long-press, and scroll directly on the phone video.
+- Turn on **Map zoom mode** in the control rail to make the mouse wheel pinch-zoom around the pointer in Android maps that support two-finger gestures. Wheel up zooms in; wheel down zooms out. Turn the mode off for ordinary phone scrolling. The mode clears on disconnect or controller handoff.
 - Use Back, Home, Recents, volume, and power controls in the side rail.
 - Select **Enter fullscreen** to enlarge the phone and those controls together when the browser Fullscreen API is available. **Exit fullscreen** or Escape returns to the ordinary view. Embedded browsers may decline the request; the windowed dock stays usable.
 - Open **Help** on the side rail for in-app notes on keyboard, pointer, paste, and fallback text. Help stays available while disconnected and does not send phone input. Keyboard users can open or close it and return focus to that control.
@@ -50,7 +51,7 @@ Set this up — https://github.com/hooware-ai/droiddock
 
 Rotation resets the decoder for the new video dimensions. After a Wi-Fi interruption, restore connectivity and reconnect. Current stream settings are a maximum dimension of 1280 pixels, up to 60 fps, and 6 Mbps H.264; these are encoder settings, not performance guarantees.
 
-Audio, recording, general file transfer, multitouch, and automatic clipboard synchronization are **not implemented**. Explicit image/file paste is limited to apps that accept Android rich content; it is not a general attachment mechanism. See the [roadmap](docs/ROADMAP.md) for proposed work.
+Audio, recording, general file transfer, general multitouch input, and automatic clipboard synchronization are **not implemented**. Map zoom mode provides a limited synthetic two-finger gesture. Explicit image/file paste is limited to apps that accept Android rich content; it is not a general attachment mechanism. See the [roadmap](docs/ROADMAP.md) for proposed work.
 
 ## Local by design
 
