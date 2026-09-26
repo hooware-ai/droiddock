@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadBrowser, startConnect, deliverSyntheticFrame } from './accessibility.test.mjs';
 
-function wheel(deltaY, deltaMode = 0) {
-  return { clientX: 360, clientY: 400, deltaX: 0, deltaY, deltaMode, prevented: false,
+function wheel(deltaY, deltaMode = 0, clientX = 360) {
+  return { clientX, clientY: 400, deltaX: 0, deltaY, deltaMode, prevented: false,
     preventDefault() { this.prevented = true; } };
 }
 
@@ -74,4 +74,17 @@ test('blur and controller handoff release both synthetic fingers without replay'
   second.socket.receive({ type: 'moved', message: 'Phone opened elsewhere.' });
   assert.deepEqual(second.socket.sent.slice(handoff).filter(message => message.type === 'touch').map(({ pointerId, action }) => [pointerId, action]), [[2, 1], [1, 1]]);
   assert.equal(second.button.getAttribute('aria-pressed'), 'false');
+});
+
+test('pinch stays near the wheel pointer and a hidden tab cancels it', async () => {
+  const { browser, socket, screen, button } = await connected();
+  button.handlers.click();
+  screen.handlers.wheel(wheel(-120, 0, 540));
+  const [first, second] = socket.sent.slice(-2);
+  assert.ok((first.x + second.x) / 2 > first.width * 0.7, 'gesture follows the pointer');
+  const before = socket.sent.length;
+  browser.documentState.hidden = true;
+  browser.documentHandlers.visibilitychange();
+  assert.deepEqual(socket.sent.slice(before).filter(({ type }) => type === 'touch').map(({ pointerId, action }) => [pointerId, action]), [[2, 1], [1, 1]]);
+  assert.equal(browser.runTimer(), false);
 });
