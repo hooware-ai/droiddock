@@ -79,6 +79,7 @@ function makeElement(extra = {}) {
 
 function loadBrowser({ localStorage, focused = true, hidden = false, clock = false, fetchImpl } = {}) {
   const elements = new Map();
+  const root = makeElement();
   const documentHandlers = {};
   const windowHandlers = {};
   const documentState = { hidden, focused };
@@ -144,6 +145,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
   class Observer { observe() {} }
   runInNewContext(appSource, {
     document: Object.assign(documentState, {
+      documentElement: root,
       getElementById: element,
       querySelectorAll: (sel) => sel === '[data-key]' ? keyButtons : [],
       addEventListener(name, handler) { addListener(documentHandlers, name, handler); },
@@ -171,7 +173,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
     DataView,
   });
   return {
-    element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests,
+    element, root, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests,
     runTimer() { const [id, callback] = [...timers.entries()].at(-1) || []; if (callback) { timers.delete(id); callback(); return true; } return false; },
   };
 }
@@ -208,7 +210,7 @@ function deliverSyntheticFrame(browser, socket) {
 export { loadBrowser, startConnect, deliverSyntheticFrame, dispatchKey, keyEvent };
 
 test('browser chrome exposes names, a live status, and natural tab order on the synthetic screen', () => {
-  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<html lang="en" data-theme="system">/);
   assert.doesNotMatch(html, /tabindex="[1-9]/);
   const canvas = tagById('screen');
   assert.equal(canvas.attrs.tabindex, '0');
@@ -260,6 +262,92 @@ test('visible focus styles meet a 3:1 contrast ratio on the empty rail and dark 
   assert.ok(contrast(slate[1], '#f1f4f7') >= 3, `rail focus ${slate[1]} on page background`);
   assert.ok(contrast(canvasFocus[1], '#000000') >= 3, `screen focus ${canvasFocus[1]} on black`);
   assert.doesNotMatch(css, /\.state\{[^}]*font-size:0/);
+});
+
+test('system, light, and dark palettes cover chrome without filtering phone pixels', () => {
+  assert.match(html, /<html lang="en" data-theme="system">/);
+  assert.match(html, /<meta name="color-scheme" content="light dark">/);
+  assert.match(html, /<fieldset class="appearance"><legend>Appearance<\/legend>/);
+  for (const option of ['system', 'light', 'dark']) {
+    const input = tagById(`theme-${option}`);
+    assert.equal(input.name, 'input');
+    assert.equal(input.attrs.name, 'theme');
+    assert.equal(input.attrs.value, option);
+    assert.equal(input.attrs['aria-label'], `${option[0].toUpperCase()}${option.slice(1)} theme`);
+  }
+  const palette = (selector) => {
+    const rule = css.match(new RegExp(`${selector}\\{([^}]*)\\}`));
+    assert.ok(rule, `missing palette ${selector}`);
+    return Object.fromEntries([...rule[1].matchAll(/(--[a-z-]+):(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6})(?=;|$)/g)]
+      .map((match) => [match[1], match[2].length === 4 ? `#${[...match[2].slice(1)].map(char => char + char).join('')}` : match[2]]));
+  };
+  const light = palette(':root');
+  const dark = palette(':root\\[data-theme=dark\\]');
+  for (const colors of [light, dark]) {
+    assert.ok(contrast(colors['--ink'], colors['--surface']) >= 4.5);
+    assert.ok(contrast(colors['--muted'], colors['--surface']) >= 4.5);
+    assert.ok(contrast(colors['--slate'], colors['--surface']) >= 3);
+    assert.ok(contrast(colors['--slate'], colors['--page']) >= 3);
+    assert.ok(contrast(colors['--primary-bg'], '#ffffff') >= 4.5);
+    assert.ok(contrast(colors['--disabled-text'], colors['--field-disabled']) >= 3);
+    assert.ok(contrast(colors['--disabled-text'], colors['--surface']) >= 3);
+    assert.ok(contrast(colors['--error'], colors['--surface']) >= 4.5);
+  }
+  assert.match(css, /@media\(prefers-color-scheme:dark\)\{:root\[data-theme=system\]/);
+  assert.match(css, /\.dock:fullscreen[^}]*background:var\(--page\)/);
+  assert.match(css, /\.text-form input\{[^}]*background:var\(--field\);color:var\(--ink\)/);
+  assert.match(css, /\.message\.error\{color:var\(--error\)\}/);
+  assert.match(css, /\.icon-button:disabled\{color:var\(--disabled-text\)/);
+  assert.doesNotMatch(css, /canvas\{[^}]*(?:filter|opacity|mix-blend-mode):/);
+});
+
+test('theme preference persists only on selection and never reconnects or rebuilds video', async () => {
+  const values = new Map([['droiddock.theme', 'dark']]);
+  const writes = [];
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); writes.push([key, value]); },
+  };
+  const browser = loadBrowser({ localStorage: storage });
+  assert.equal(browser.root.getAttribute('data-theme'), 'dark');
+  assert.equal(browser.element('theme-dark').checked, true);
+  assert.deepEqual(writes, []);
+  const socket = await startConnect(browser);
+  deliverSyntheticFrame(browser, socket);
+  const decoder = browser.FakeVideoDecoder.latest;
+  const sent = socket.sent.length;
+  const listeners = ['system', 'light', 'dark'].map(option => browser.element(`theme-${option}`).handlers.change);
+  for (let i = 0; i < 24; i++) {
+    const option = i % 2 ? 'dark' : 'light';
+    const input = browser.element(`theme-${option}`);
+    input.checked = true;
+    input.handlers.change({ target: input });
+    assert.equal(browser.root.getAttribute('data-theme'), option);
+    assert.equal(browser.element(`theme-${option}`).checked, true);
+  }
+  assert.equal(writes.length, 24);
+  assert.ok(writes.every(([key, value]) => key === 'droiddock.theme' && ['light', 'dark'].includes(value)));
+  assert.equal(browser.sockets.length, 1);
+  assert.equal(socket.sent.length, sent);
+  assert.equal(browser.FakeVideoDecoder.latest, decoder);
+  assert.deepEqual(['system', 'light', 'dark'].map(option => browser.element(`theme-${option}`).handlers.change), listeners);
+  decoder.emit();
+  assert.equal(browser.element('state').textContent, 'Connected');
+  const typed = dispatchKey(browser, browser.element('screen'), keyEvent('a'));
+  assert.equal(typed.defaultPrevented, true);
+  assert.deepEqual(socket.sent.at(-1), { type: 'text', text: 'a' });
+});
+
+test('invalid or unavailable theme storage defaults to system and failed writes retain the session choice', () => {
+  const invalid = loadBrowser({ localStorage: { getItem: () => 'unexpected', setItem() { throw new Error('should not save'); } } });
+  assert.equal(invalid.root.getAttribute('data-theme'), 'system');
+  const unavailable = loadBrowser({ localStorage: { getItem() { throw new Error('unavailable'); }, setItem() { throw new Error('unavailable'); } } });
+  assert.equal(unavailable.root.getAttribute('data-theme'), 'system');
+  const input = unavailable.element('theme-dark');
+  input.checked = true;
+  input.handlers.change({ target: input });
+  assert.equal(unavailable.root.getAttribute('data-theme'), 'dark');
+  assert.equal(unavailable.sockets.length, 0);
 });
 
 test('keyboard handling keeps Tab in the browser and closes details before sending Back', async () => {

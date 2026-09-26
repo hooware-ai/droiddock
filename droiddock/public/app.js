@@ -43,6 +43,26 @@
   let pairingDiscoveryPending = false;
   let pairingReconnect = false;
   const available = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
+  const themeOptions = ['system', 'light', 'dark'];
+  const themePreferenceKey = 'droiddock.theme';
+
+  function applyTheme(theme, save = false) {
+    const selected = themeOptions.includes(theme) ? theme : 'system';
+    document.documentElement?.setAttribute('data-theme', selected);
+    for (const option of themeOptions) $(`theme-${option}`).checked = option === selected;
+    if (save) {
+      try { localStorage.setItem(themePreferenceKey, selected); } catch { /* Keep this session's choice. */ }
+    }
+  }
+
+  let savedTheme = 'system';
+  try { savedTheme = localStorage.getItem(themePreferenceKey); } catch { /* System theme remains available. */ }
+  applyTheme(savedTheme);
+  for (const option of themeOptions) {
+    $(`theme-${option}`).addEventListener('change', (event) => {
+      if (event.target.checked) applyTheme(option, true);
+    });
+  }
 
   function canControl() {
     return state === 'connected' && hasFrame && socket?.readyState === WebSocket.OPEN;
