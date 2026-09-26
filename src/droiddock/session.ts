@@ -27,7 +27,7 @@ export class ScrcpySession {
   private control?: Socket;
   private closed = false;
   private remoteMayExist = false;
-  private pastePending?: Promise<void>;
+  private pastePending?: Promise<boolean>;
   private readonly pasteCleanup = new Map<string, { remote: boolean; privateFile: boolean }>();
   private readonly scid = randomInt(1, 0x7fffffff).toString(16).padStart(8, "0");
   private readonly remote = `/data/local/tmp/droiddock-${this.scid}.jar`;
@@ -147,16 +147,19 @@ export class ScrcpySession {
     return parseLockState(result.stdout);
   }
 
-  async pasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<void> {
+  async pasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<boolean> {
     const work = this.performPasteFile(localPath, mime, signal);
     this.pastePending = work;
-    try { await work; }
+    try { return await work; }
     finally { if (this.pastePending === work) this.pastePending = undefined; }
   }
 
-  private async performPasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<void> {
+  private async performPasteFile(localPath: string, mime: string, signal: AbortSignal): Promise<boolean> {
     this.check(signal);
     if (!this.transport || !this.control || this.control.destroyed) throw new Error("Connect your phone first.");
+    // Never stage another upload while a previous device path may still exist.
+    if (this.pasteCleanup.size) await this.cleanupPasteTransfers();
+    this.check(signal);
     const identity = await runChecked(this.adb, ["-s", this.transport, "shell", "getprop", "ro.serialno"], { timeoutMs: 3000, signal });
     if (identity.stdout.trim() !== this.serial) throw new Error("The connected device is not the configured phone.");
     const packageName = "ai.hooware.droiddock.paste";
@@ -172,6 +175,7 @@ export class ScrcpySession {
     const run = (args: string[], timeoutMs = 5000, cancellable = true) => runChecked(this.adb, ["-s", this.transport, ...args], {
       timeoutMs, maxOutputBytes: 4096, ...(cancellable ? { signal } : {}),
     });
+    let cleanupPending = false;
     try {
       await run(["push", localPath, remote], 60000);
       this.check(signal);
@@ -188,8 +192,10 @@ export class ScrcpySession {
       this.check(signal);
       this.input({ type: "key", key: "paste" });
     } finally {
-      await this.cleanupPasteTransfers().catch(() => {});
+      try { await this.cleanupPasteTransfers(); }
+      catch { cleanupPending = true; }
     }
+    return cleanupPending;
   }
 
   private async cleanupPasteTransfers(): Promise<void> {

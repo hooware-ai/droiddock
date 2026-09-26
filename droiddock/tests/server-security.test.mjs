@@ -634,9 +634,14 @@ test('failed paste staging cleanup survives disconnect and retries on the verifi
   session.transport = 'OLD';
   session.control = { destroyed:false, writableLength:0, write() {}, destroy() { this.destroyed = true; } };
   state.failRm = true;
-  await session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal);
+  assert.equal(await session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), true,
+    'successful delivery reports its unconfirmed cleanup');
   assert.equal(session.pasteCleanup.size, 1, 'failed transfer cleanup remains owned by session');
   const [id] = session.pasteCleanup.keys();
+  const pushes = state.calls.filter(call => call.args.includes('push')).length;
+  await assert.rejects(session.pasteFile('SYNTHETIC_INPUT', 'image/png', new AbortController().signal), /cleanup could not be confirmed/i);
+  assert.equal(state.calls.filter(call => call.args.includes('push')).length, pushes,
+    'a second upload cannot begin while device cleanup is unresolved');
   state.oldIdentity = null;
   await assert.rejects(session.stop(), /cleanup could not be confirmed/i);
   assert.equal(session.pasteCleanup.size, 1, 'disconnect cannot forget a device file');

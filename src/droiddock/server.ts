@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
@@ -8,7 +8,7 @@ import { ScrcpySession } from "./session.js";
 import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
-import { pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
+import { HostPasteCleanup, pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const installationId = createHash("sha256").update(resolve(root).toLowerCase()).digest("hex").slice(0, 16);
@@ -31,6 +31,7 @@ let shuttingDown = false;
 let connectionIntent = 0;
 let pasteCapability: string | undefined;
 let pasteAbort: AbortController | undefined;
+const hostPasteCleanup = new HostPasteCleanup();
 const cleanupSessions = new Set<ScrcpySession>();
 const cleanupMessage = "Phone cleanup could not be confirmed. Restore the phone connection and select Connect to retry cleanup.";
 const lockMonitor = new LockStateMonitor(update => send(update));
@@ -144,30 +145,40 @@ const http = createServer(async (req, res) => {
         reply(res, 403, { error: "Only the current connected phone view can paste files." }); return;
       }
       if (pasteAbort) { reply(res, 409, { error: "Another file paste is still running." }); return; }
+      if (hostPasteCleanup.pending && !(await hostPasteCleanup.retry())) {
+        reply(res, 503, { error: "Previous temporary file cleanup is pending. Paste again after cleanup succeeds." }); return;
+      }
       const owner = client, current = session, controller = new AbortController();
       pasteAbort = controller;
       const timeout = setTimeout(() => controller.abort(), 75000);
       req.once("aborted", () => controller.abort());
       res.once("close", () => { if (!res.writableEnded) controller.abort(); });
-      let staged: string | undefined;
+      let responseCode = 200;
+      let response: { message?: string; error?: string } = {};
       try {
         const mime = pasteMime(req.headers["content-type"]);
-        staged = await stagePasteFile(req, controller.signal);
+        const staged = await stagePasteFile(req, controller.signal, path => hostPasteCleanup.track(path));
         if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
           throw new PasteFileError("The phone view changed. Paste again from the current view.", 409);
-        await current.pasteFile(staged, mime, controller.signal);
+        const deviceCleanupPending = await current.pasteFile(staged, mime, controller.signal);
         if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
           throw new PasteFileError("The phone view changed. Paste again from the current view.", 409);
-        reply(res, 200, { message: "Paste sent to the focused phone app. If nothing appears, use that app's Attach control." });
+        response = { message: deviceCleanupPending
+          ? "Paste may have reached the phone, but phone cleanup is pending. Do not resend it yet; reconnect to retry cleanup."
+          : "Paste sent to the focused phone app. If nothing appears, use that app's Attach control." };
       } catch (error) {
-        if (!res.destroyed) reply(res, error instanceof PasteFileError ? error.status : 409,
-          { error: error instanceof PasteFileError ? error.message : controller.signal.aborted ? "File paste was cancelled." :
-            error instanceof Error ? error.message : "The phone could not paste this file." });
+        responseCode = error instanceof PasteFileError ? error.status : 409;
+        response = { error: error instanceof PasteFileError ? error.message : controller.signal.aborted ? "File paste was cancelled." :
+          error instanceof Error ? error.message : "The phone could not paste this file." };
       } finally {
         clearTimeout(timeout);
-        if (staged) await unlink(staged).catch(() => {});
+        if (!(await hostPasteCleanup.retry())) {
+          responseCode = 503;
+          response = { error: "Paste may have reached the phone, but temporary file cleanup is pending. Do not resend it yet." };
+        }
         if (pasteAbort === controller) pasteAbort = undefined;
       }
+      if (!res.destroyed) reply(res, responseCode, response);
       return;
     }
     if (req.url?.startsWith("/api/")) {
@@ -183,6 +194,9 @@ const http = createServer(async (req, res) => {
       }
       if (req.url === "/api/disconnect") { await stop(); reply(res, 200, status()); return; }
       if (req.url === "/api/shutdown") {
+        if (hostPasteCleanup.pending && !(await hostPasteCleanup.retry())) {
+          reply(res, 409, { error: "Temporary file cleanup is pending. Retry shutdown after cleanup succeeds." }); return;
+        }
         if (cleanupSessions.size) { reply(res, 409, { error: cleanupMessage }); return; }
         if (client || session || state === "connecting" || state === "connected") { reply(res, 409, { error: "Close the controlling browser tab before restarting DroidDock." }); return; }
         reply(res, 200, { app: "DroidDock", stopping: true }); void shutdown(); return;
@@ -252,10 +266,11 @@ async function shutdown() {
   shuttingDown = true;
   client?.terminate();
   await stop();
-  if (cleanupSessions.size) {
+  const hostClean = await hostPasteCleanup.retry();
+  if (cleanupSessions.size || !hostClean) {
     shuttingDown = false;
-    setState("error", cleanupMessage);
-    console.error("DroidDock remains open because phone cleanup could not be confirmed. Restore the phone connection and retry.");
+    setState("error", cleanupSessions.size ? cleanupMessage : "Temporary file cleanup is pending. Retry shutdown after cleanup succeeds.");
+    console.error("DroidDock remains open because cleanup could not be confirmed. Restore the connection and retry.");
     return;
   }
   sockets.close(); http.close();

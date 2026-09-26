@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { readFile, readdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { pasteMime, stagePasteFile, MAX_PASTE_FILE_BYTES } from '../../dist/droiddock/file-paste.js';
+import { HostPasteCleanup, pasteMime, stagePasteFile, MAX_PASTE_FILE_BYTES } from '../../dist/droiddock/file-paste.js';
 
 function request(chunks, headers = {}) {
   return Object.assign(Readable.from(chunks), { headers });
@@ -25,6 +25,8 @@ test('oversized, empty and cancelled uploads leave no staged file', async () => 
   await assert.rejects(stagePasteFile(request([], { 'content-length': String(MAX_PASTE_FILE_BYTES + 1) }), new AbortController().signal), { status: 413 });
   await assert.rejects(stagePasteFile(request([]), new AbortController().signal), { status: 400 });
   await assert.rejects(stagePasteFile(request([Buffer.alloc(MAX_PASTE_FILE_BYTES + 1)]), new AbortController().signal), { status: 413 });
+  await assert.rejects(stagePasteFile(request([Buffer.from('x')]), new AbortController().signal,
+    () => { throw new Error('synthetic tracking failure'); }), /tracking failure/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(stagePasteFile(request([Buffer.from('x')]), controller.signal));
   const stalled = new Readable({ read() {} });
@@ -35,4 +37,20 @@ test('oversized, empty and cancelled uploads leave no staged file', async () => 
   await assert.rejects(pending);
   const after = (await readdir(tmpdir())).filter(name => name.startsWith('droiddock-paste-'));
   assert.deepEqual(after.filter(name => !before.has(name)), []);
+});
+
+test('failed host cleanup remains owned and blocks reuse until retry succeeds', async () => {
+  let fail = true;
+  const removed = [];
+  const cleanup = new HostPasteCleanup(async path => {
+    if (fail) throw Object.assign(new Error('locked'), { code: 'EPERM' });
+    removed.push(path);
+  });
+  cleanup.track('SYNTHETIC_STAGED_FILE');
+  assert.equal(await cleanup.retry(), false);
+  assert.equal(cleanup.pending, true);
+  fail = false;
+  assert.equal(await cleanup.retry(), true);
+  assert.equal(cleanup.pending, false);
+  assert.deepEqual(removed, ['SYNTHETIC_STAGED_FILE']);
 });

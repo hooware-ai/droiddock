@@ -10,13 +10,28 @@ export class PasteFileError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+export class HostPasteCleanup {
+  private readonly paths = new Set<string>();
+  constructor(private readonly remove: (path: string) => Promise<void> = unlink) {}
+  track(path: string): void { this.paths.add(path); }
+  get pending(): boolean { return this.paths.size > 0; }
+  async retry(): Promise<boolean> {
+    for (const path of this.paths) {
+      try { await this.remove(path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue; }
+      this.paths.delete(path);
+    }
+    return !this.pending;
+  }
+}
+
 export function pasteMime(value: string | string[] | undefined): string {
   if (typeof value !== "string" || value.length > 100 || !/^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(value))
     throw new PasteFileError("Select one image or file to paste.", 415);
   return value.toLowerCase();
 }
 
-export async function stagePasteFile(req: IncomingMessage, signal: AbortSignal): Promise<string> {
+export async function stagePasteFile(req: IncomingMessage, signal: AbortSignal, onCreated: (path: string) => void = () => {}): Promise<string> {
   signal.throwIfAborted();
   const length = req.headers["content-length"];
   if (length && (!/^\d+$/.test(length) || Number(length) > MAX_PASTE_FILE_BYTES))
@@ -27,6 +42,7 @@ export async function stagePasteFile(req: IncomingMessage, signal: AbortSignal):
   signal.addEventListener("abort", cancel, { once: true });
   let complete = false;
   try {
+    onCreated(path);
     signal.throwIfAborted();
     let total = 0;
     for await (const chunk of req) {
@@ -43,6 +59,6 @@ export async function stagePasteFile(req: IncomingMessage, signal: AbortSignal):
   } finally {
     signal.removeEventListener("abort", cancel);
     await handle.close();
-    if (!complete) await unlink(path).catch(() => {});
+    if (!complete) await unlink(path);
   }
 }
