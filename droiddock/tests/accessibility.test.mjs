@@ -110,7 +110,8 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
         hidden: 'hidden' in tagById(id).attrs,
         disabled: 'disabled' in tagById(id).attrs,
         contains(node) {
-          return node === this || (id === 'pin-controls' && ['pin-input', 'pin-form', 'send-pin', 'pin-backspace', 'pin-enter', 'close-pin', 'auto-pin'].some(child => node === element(child)));
+          return node === this || (id === 'pin-controls' && ['pin-input', 'pin-form', 'send-pin', 'pin-backspace', 'pin-enter', 'close-pin', 'auto-pin'].some(child => node === element(child))) ||
+            (id === 'pair-controls' && ['pair-form', 'pair-code', 'pair-endpoint', 'pair-submit', 'pair-refresh', 'pair-cancel', 'close-pair'].some(child => node === element(child)));
         },
       }));
     }

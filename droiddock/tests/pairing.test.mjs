@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverPairingEndpoint, pairConfiguredPhone, parsePairingRequest } from '../../dist/droiddock/pairing.js';
+import { checkPairingEndpoint, discoverPairingEndpoint, pairConfiguredPhone, parsePairingRequest } from '../../dist/droiddock/pairing.js';
 
 const serial = 'SYNTHETICPHONE';
 const address = '192.0.2.10';
@@ -45,6 +45,23 @@ test('one matching mDNS pairing service yields only a candidate endpoint', () =>
     services.replace('adb-guid-y _adb-tls-pairing', 'studio-qr-y _adb-tls-pairing'),
   ]) assert.deepEqual(discoverPairingEndpoint(devices, sample, serial), { kind: 'ambiguous' });
   assert.deepEqual(discoverPairingEndpoint(`${serial} unauthorized`, services, serial), { kind: 'ambiguous' });
+});
+
+test('read-only endpoint check is bounded, returns coarse evidence, and honors cancellation', async () => {
+  const controller = new AbortController();
+  const available = fakeAdb();
+  assert.equal(await checkPairingEndpoint('synthetic-adb', serial, controller.signal, available.run), 'available');
+  assert.deepEqual(available.calls.map(call => call.args), [['devices', '-l'], ['mdns', 'services']]);
+  assert.equal(available.calls.every(call => call.options.timeoutMs === 5000 && call.options.maxOutputBytes === 32 * 1024), true);
+  assert.equal(available.calls.every(call => call.options.input === undefined), true);
+  const missing = fakeAdb({ serviceCode: 1 });
+  assert.equal(await checkPairingEndpoint('synthetic-adb', serial, controller.signal, missing.run), 'manual-required');
+  const ambiguous = fakeAdb({ serviceText: `${services}\nadb-other _adb-tls-pairing._tcp ${address}:37003` });
+  assert.equal(await checkPairingEndpoint('synthetic-adb', serial, controller.signal, ambiguous.run), 'ambiguous');
+  controller.abort();
+  const canceled = fakeAdb();
+  assert.equal(await checkPairingEndpoint('synthetic-adb', serial, controller.signal, canceled.run), 'unavailable');
+  assert.equal(canceled.calls.length, 0);
 });
 
 test('pairing uses fixed ADB verbs and sends code only through stdin', async () => {
