@@ -66,20 +66,39 @@ test('failures, skipped prerequisites, and requested live failures stay distinct
   assert.doesNotMatch(text, /PRIVATE/);
 
   const failedAdb = baseline();
+  failedAdb.ok = false;
   failedAdb.checks.find(item => item.name === 'adb').ok = false;
   failedAdb.checks = failedAdb.checks.filter(item => item.name !== 'device');
   assert.match(formatSupportSummary(failedAdb), /\| Configured phone \| Skipped \| — \|/);
 
   const failedPowerShell = baseline();
+  failedPowerShell.ok = false;
   failedPowerShell.checks.find(item => item.name === 'powershell').ok = false;
   failedPowerShell.checks = failedPowerShell.checks.filter(item => item.name !== 'device');
   assert.match(formatSupportSummary(failedPowerShell), /\| PowerShell \| Failed \| — \|/);
   assert.match(formatSupportSummary(failedPowerShell), /\| Configured phone \| Skipped \| — \|/);
 
   const failedLive = baseline();
+  failedLive.ok = false;
   failedLive.liveRequested = true;
   failedLive.checks.push({ name: 'live', ok: false, message: 'PRIVATE PATH' });
   assert.match(formatSupportSummary(failedLive), /\| Live stream packets \| Failed \| — \|/);
+});
+
+test('contradictory overall and prerequisite results cannot claim dependent checks passed', () => {
+  const overall = baseline();
+  overall.ok = false;
+  const overallText = formatSupportSummary(overall);
+  assert.doesNotMatch(overallText, /\| .* \| Passed \|/);
+
+  const configuration = baseline();
+  configuration.ok = false;
+  configuration.checks.find(item => item.name === 'configuration').ok = false;
+  const configurationText = formatSupportSummary(configuration);
+  assert.match(configurationText, /\| Configuration \| Failed \| — \|/);
+  assert.match(configurationText, /\| ADB \| Unknown \| — \|/);
+  assert.match(configurationText, /\| PowerShell \| Unknown \| — \|/);
+  assert.match(configurationText, /\| Configured phone \| Unknown \| — \|/);
 });
 
 test('private markers in allowed and extra fields cannot enter the summary', () => {

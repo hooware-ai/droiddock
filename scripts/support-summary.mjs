@@ -14,13 +14,15 @@ const safeVersion = value =>
 
 function entries(report) {
   const rows = new Map();
-  if (!Array.isArray(report?.checks) || report.checks.length > CHECKS.length) return rows;
+  if (!Array.isArray(report?.checks) || report.checks.length > CHECKS.length) return { rows, valid: false };
+  let valid = true;
   for (const item of report.checks) {
-    if (!item || typeof item !== 'object' || !CHECKS.some(([name]) => name === item.name)) continue;
-    if (rows.has(item.name)) rows.set(item.name, null);
+    if (!item || typeof item !== 'object' || !CHECKS.some(([name]) => name === item.name) ||
+        typeof item.ok !== 'boolean') { valid = false; continue; }
+    if (rows.has(item.name)) { rows.set(item.name, null); valid = false; }
     else rows.set(item.name, item);
   }
-  return rows;
+  return { rows, valid };
 }
 
 function directStatus(item, name) {
@@ -44,10 +46,11 @@ function statuses(report, rows) {
   const result = new Map();
   for (const [name] of CHECKS.slice(0, -1)) {
     const item = rows.get(name);
-    if (item === undefined && (name === 'adb' || name === 'powershell') &&
-        result.get('configuration') === 'Failed') result.set(name, 'Skipped');
-    else if (item === undefined && name === 'device' &&
-        ['configuration', 'adb', 'powershell'].some(key => ['Failed', 'Skipped'].includes(result.get(key)))) result.set(name, 'Skipped');
+    if ((name === 'adb' || name === 'powershell') && result.get('configuration') !== 'Passed')
+      result.set(name, item === undefined && result.get('configuration') === 'Failed' ? 'Skipped' : 'Unknown');
+    else if (name === 'device' && ['configuration', 'adb', 'powershell'].some(key => result.get(key) !== 'Passed'))
+      result.set(name, item === undefined && ['configuration', 'adb', 'powershell'].some(key =>
+        ['Failed', 'Skipped'].includes(result.get(key))) ? 'Skipped' : 'Unknown');
     else result.set(name, directStatus(item, name));
   }
   const live = rows.get('live');
@@ -60,8 +63,11 @@ function statuses(report, rows) {
 }
 
 export function formatSupportSummary(report) {
-  const rows = entries(report);
+  const { rows, valid } = entries(report);
   const status = statuses(report, rows);
+  const consistent = valid && report?.diagnosticVersion === 1 && typeof report?.liveRequested === 'boolean' &&
+    typeof report?.ok === 'boolean' && report.ok === report.checks.every(item => item.ok);
+  if (!consistent) for (const [name, result] of status) if (result === 'Passed') status.set(name, 'Unknown');
   const version = report?.diagnosticVersion === 1 ? '1' : 'Unavailable';
   const lines = [
     '# DroidDock support summary',
