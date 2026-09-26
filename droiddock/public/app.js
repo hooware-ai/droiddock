@@ -27,6 +27,10 @@
   let pointer = null;
   let pendingMove = null;
   let moveAnimation = 0;
+  let mapZoom = false;
+  let zoomGesture = null;
+  let zoomWheelDelta = 0;
+  let lastZoomAt = 0;
   let connectionTimer = 0;
   let generation = 0;
   let escapeSawFullscreen = false;
@@ -44,6 +48,8 @@
   }
 
   function setState(next, message = '') {
+    if (next !== 'connected' && state === 'connected') cancelZoom();
+    if (next === 'idle' || next === 'error' || next === 'moved') setMapZoom(false);
     state = next;
     const labels = { idle: 'Disconnected', connecting: 'Connecting', connected: 'Connected', moved: 'Opened elsewhere', error: 'Connection error' };
     const label = labels[next] || next;
@@ -98,6 +104,7 @@
     if (pinControlsDisabled !== disabled) {
       pinControlsDisabled = disabled;
       for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
+      $('map-zoom').disabled = disabled;
       if (disabled) clearPin();
     }
   }
@@ -253,6 +260,7 @@
   }
 
   function clearScreen() {
+    cancelZoom();
     releasePointer();
     resetDecoder();
     hasFrame = false;
@@ -265,6 +273,7 @@
 
   function fail(message) {
     clearTimeout(connectionTimer);
+    setMapZoom(false);
     const oldSocket = socket;
     socket = null;
     oldSocket?.close();
@@ -288,6 +297,7 @@
       fail('Live video needs WebCodecs. Open DroidDock in a current Chrome or Edge browser on localhost.');
       return;
     }
+    setMapZoom(false);
     const currentGeneration = ++generation;
     lockShown = false; lockState = 'unknown'; lockSuspended = false; lockSubscription = '';
     closePin(false);
@@ -311,6 +321,7 @@
           const message = JSON.parse(event.data);
           if (message.type === 'moved') {
             clearTimeout(connectionTimer);
+            setMapZoom(false);
             ++generation;
             socket = null;
             ws.close();
@@ -351,6 +362,7 @@
   }
 
   async function disconnect() {
+    setMapZoom(false);
     releasePointer();
     ++generation;
     clearTimeout(connectionTimer);
@@ -458,8 +470,57 @@
     if (canvas.hasPointerCapture(active.id)) canvas.releasePointerCapture(active.id);
   }
 
+  function cancelZoom() {
+    const active = zoomGesture;
+    if (!active) return;
+    zoomGesture = null;
+    clearTimeout(active.timer);
+    if (active.generation !== generation || !canControl()) return;
+    send({ type: 'touch', pointerId: 2, action: 1, ...active.second });
+    send({ type: 'touch', pointerId: 1, action: 1, ...active.first });
+  }
+
+  function setMapZoom(enabled) {
+    if (!enabled) cancelZoom();
+    mapZoom = enabled;
+    zoomWheelDelta = 0;
+    if (!enabled) lastZoomAt = 0;
+    $('map-zoom').setAttribute('aria-pressed', String(enabled));
+    $('map-zoom').title = enabled ? 'Map zoom mode on; wheel pinches the phone screen' : 'Map zoom mode off; wheel scrolls normally';
+  }
+
+  function startZoom(direction, anchor) {
+    if (zoomGesture || pointer !== null || anchor.width < 32 || anchor.height < 32) return;
+    const outer = Math.min(Math.max(8, Math.round(anchor.width * 0.12)), Math.floor((anchor.width - 1) / 2));
+    const inner = Math.max(2, Math.round(outer * 0.6));
+    const center = Math.max(outer, Math.min(anchor.width - outer - 1, anchor.x));
+    const startRadius = direction > 0 ? inner : outer;
+    const endRadius = direction > 0 ? outer : inner;
+    const point = (radius, side) => ({ x: center + side * radius, y: anchor.y, width: anchor.width, height: anchor.height });
+    const active = { generation, first: point(startRadius, -1), second: point(startRadius, 1), timer: 0 };
+    zoomGesture = active;
+    if (!send({ type: 'touch', pointerId: 1, action: 0, ...active.first }) ||
+        !send({ type: 'touch', pointerId: 2, action: 0, ...active.second })) { cancelZoom(); return; }
+    const move = (fraction) => {
+      if (zoomGesture !== active || active.generation !== generation || !mapZoom || !canControl() || document.hidden || !browserFocused) { cancelZoom(); return false; }
+      const radius = Math.round(startRadius + (endRadius - startRadius) * fraction);
+      active.first = point(radius, -1);
+      active.second = point(radius, 1);
+      if (!send({ type: 'touch', pointerId: 1, action: 2, ...active.first }) ||
+          !send({ type: 'touch', pointerId: 2, action: 2, ...active.second })) { cancelZoom(); return false; }
+      return true;
+    };
+    active.timer = setTimeout(() => {
+      if (!move(0.5)) return;
+      active.timer = setTimeout(() => {
+        if (!move(1)) return;
+        active.timer = setTimeout(cancelZoom, 30);
+      }, 30);
+    }, 30);
+  }
+
   canvas.addEventListener('pointerdown', (event) => {
-    if (!canControl() || pointer !== null || event.button !== 0) return;
+    if (!canControl() || pointer !== null || zoomGesture || event.button !== 0) return;
     event.preventDefault();
     canvas.focus({ preventScroll: true });
     pointer = { id: event.pointerId, last: coordinates(event) };
@@ -475,12 +536,22 @@
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('lostpointercapture', releasePointer);
-  window.addEventListener('blur', () => releasePointer());
+  window.addEventListener('blur', () => { cancelZoom(); releasePointer(); });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('wheel', (event) => {
     if (!canControl()) return;
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
+    if (mapZoom) {
+      if (pointer !== null || zoomGesture || !browserFocused || document.hidden || !Number.isFinite(event.deltaY * unit)) return;
+      zoomWheelDelta = Math.max(-240, Math.min(240, zoomWheelDelta + event.deltaY * unit));
+      if (Math.abs(zoomWheelDelta) < 60 || Date.now() - lastZoomAt < 120) return;
+      const direction = zoomWheelDelta < 0 ? 1 : -1;
+      zoomWheelDelta = 0;
+      lastZoomAt = Date.now();
+      startZoom(direction, coordinates(event));
+      return;
+    }
     send({ type: 'scroll', ...coordinates(event), dx: Math.max(-1, Math.min(1, -event.deltaX * unit / 100)), dy: Math.max(-1, Math.min(1, -event.deltaY * unit / 100)) });
   }, { passive: false });
   const keyboardKeys = { Escape: 'back', Home: 'home', Enter: 'enter', Backspace: 'backspace', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
@@ -610,6 +681,7 @@
     closeHelpControls();
   });
   window.addEventListener('blur', () => { browserFocused = false; closePin(false); syncLockSubscription(); });
+  $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
   window.addEventListener('pagehide', () => { closePin(false); disconnect(); });
   $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
@@ -653,7 +725,7 @@
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { releasePointer(); closePin(false); }
+    if (document.hidden) { cancelZoom(); releasePointer(); closePin(false); }
     syncLockSubscription();
   });
   fetch('/api/status').then((response) => {

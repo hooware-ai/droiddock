@@ -77,12 +77,14 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
+function loadBrowser({ localStorage, focused = true, hidden = false, clock = false } = {}) {
   const elements = new Map();
   const documentHandlers = {};
   const windowHandlers = {};
   const documentState = { hidden, focused };
   const requests = [];
+  const timers = new Map();
+  let nextTimerId = 0;
   const keyButtons = ['back', 'home', 'recents', 'volumeDown', 'volumeUp', 'power'].map((key) => makeElement({ dataset: { key }, disabled: true }));
   const summary = makeElement();
   const more = makeElement({
@@ -156,8 +158,8 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
     EncodedVideoChunk: class { constructor(init) { Object.assign(this, init); } },
     MutationObserver: Observer,
     ResizeObserver: Observer,
-    setTimeout: () => 1,
-    clearTimeout() {},
+    setTimeout(callback) { const id = ++nextTimerId; if (clock) timers.set(id, callback); return id; },
+    clearTimeout(id) { timers.delete(id); },
     fetch: (url) => { requests.push(url); return new Promise(() => {}); },
     requestAnimationFrame: () => 1,
     cancelAnimationFrame() {},
@@ -166,7 +168,10 @@ function loadBrowser({ localStorage, focused = true, hidden = false } = {}) {
     Uint8Array,
     DataView,
   });
-  return { element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests };
+  return {
+    element, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests,
+    runTimer() { const [id, callback] = [...timers.entries()].at(-1) || []; if (callback) { timers.delete(id); callback(); return true; } return false; },
+  };
 }
 
 function dispatchKey(browser, target, event) {
