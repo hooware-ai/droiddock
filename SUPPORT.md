@@ -12,4 +12,6 @@ Provide the repository revision or version, Windows/Node/browser versions, USB o
 
 Diagnostics in the setup guide may help identify the failing step. Review their output before extracting a short sanitized error. Reproduce on a neutral test screen if a screenshot is essential; do not rely on a small blur to remove private content from an otherwise private phone screen.
 
+For a compact report, run `node scripts/Test-DroidDock.mjs --support-summary` and review its Markdown before posting it. The summary uses fixed check names, result categories, and validated tool versions; it does not copy or upload itself. Add `--live` only if you deliberately want the optional packet check. A passed packet check does not prove the phone video rendered in your browser.
+
 For suspected security vulnerabilities, stop and use [private security reporting](SECURITY.md). Do not include vulnerability details in an ordinary support issue.

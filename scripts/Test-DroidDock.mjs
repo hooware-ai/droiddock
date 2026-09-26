@@ -6,6 +6,7 @@ import { once } from 'node:events';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { formatSupportSummary } from './support-summary.mjs';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -259,21 +260,26 @@ export async function diagnose({ root = projectRoot, env = process.env, live = f
   return { app: 'DroidDock', diagnosticVersion: 1, ok: checks.every(item => item.ok), liveRequested: live, checks };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  if (args.some(arg => !['--live', '--json', '--help'].includes(arg))) {
-    console.log(JSON.stringify({ app: 'DroidDock', ok: false, message: 'Usage: node scripts/Test-DroidDock.mjs [--live] [--json] [--help]' }));
-    process.exitCode = 2;
-  } else if (args.includes('--help')) {
-    console.log(JSON.stringify({ usage: 'node scripts/Test-DroidDock.mjs [--live] [--json]', exitCodes: { 0: 'All requested checks passed', 1: 'A diagnostic check failed', 2: 'Invalid arguments' }, live: 'Observe an existing active stream, or verify video in a temporary server and disconnect. No screen content is saved and no phone input is sent.' }, null, 2));
-  } else {
-    try {
-      const report = await diagnose({ live: args.includes('--live') });
-      console.log(JSON.stringify(report, null, 2));
-      process.exitCode = report.ok ? 0 : 1;
-    } catch {
-      console.log(JSON.stringify({ app: 'DroidDock', ok: false, message: 'Diagnostics could not complete. Verify the local installation and retry.' }));
-      process.exitCode = 1;
-    }
+export async function runDiagnosticCli(args, diagnoseFn = diagnose) {
+  const usage = 'Usage: node scripts/Test-DroidDock.mjs [--live] [--json | --support-summary] [--help]';
+  const summary = args.includes('--support-summary');
+  if (args.some(arg => !['--live', '--json', '--support-summary', '--help'].includes(arg)) ||
+      (summary && args.includes('--json'))) {
+    return { output: JSON.stringify({ app: 'DroidDock', ok: false, message: usage }), exitCode: 2 };
   }
+  if (args.includes('--help')) {
+    return { output: JSON.stringify({ usage: usage.slice('Usage: '.length), exitCodes: { 0: 'All requested checks passed', 1: 'A diagnostic check failed', 2: 'Invalid arguments' }, live: 'Observe an existing active stream, or verify video in a temporary server and disconnect. No screen content is saved and no phone input is sent.', supportSummary: 'Explicit Markdown allowlist of check outcomes and tool versions. Review before sharing; no upload or clipboard write.' }, null, 2), exitCode: 0 };
+  }
+  try {
+    const report = await diagnoseFn({ live: args.includes('--live') });
+    return { output: summary ? formatSupportSummary(report) : JSON.stringify(report, null, 2), exitCode: report.ok ? 0 : 1 };
+  } catch {
+    return { output: summary ? formatSupportSummary(null) : JSON.stringify({ app: 'DroidDock', ok: false, message: 'Diagnostics could not complete. Verify the local installation and retry.' }), exitCode: 1 };
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const result = await runDiagnosticCli(process.argv.slice(2));
+  console.log(result.output);
+  process.exitCode = result.exitCode;
 }

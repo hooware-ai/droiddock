@@ -105,11 +105,14 @@ For installation/device diagnostics on the supported Windows host:
 ```powershell
 node scripts/Test-DroidDock.mjs
 node scripts/Test-DroidDock.mjs --live
+node scripts/Test-DroidDock.mjs --support-summary
 ```
 
 The baseline checks configuration, dependencies, build artifacts, vendor integrity, and phone reachability without starting video. `--live` adds packet verification. When idle, it uses a temporary service and phone session and cleans them up. When an active session exists, it observes advancing packet counters without taking control from the browser.
 
 The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for pass, 1 for failed checks, 2 for invalid arguments. These codes differ from the installer's `needs_action` result. Review output before sharing it, even when individual checks redact identities.
+
+`--support-summary` explicitly prints a compact Markdown table of fixed check outcomes and validated tool versions from that same diagnostic result. It omits paths, device identities, endpoints, raw command output, and error text. It does not write to the clipboard or upload anything. Review the summary yourself before sharing it. Add `--live` only when you intend to run the optional live packet check; the summary flag alone performs baseline checks only. `--json` and `--support-summary` cannot be combined. Output format does not change the diagnostic exit codes.
 
 **Packet checks do not prove browser rendering.** Open the returned URL, select Connect, and inspect actual phone video. Use harmless navigation to check input only when authorized. Do not send a message, buy something, or change a sensitive setting as a test. Report offline checks, device connectivity, and rendered video separately. A disconnected phone leaves live setup incomplete even if all offline tests pass.
 
