@@ -26,6 +26,7 @@
           <button id="connect" class="icon-button primary" type="button" title="Connect" aria-label="Connect" aria-describedby="state"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v4m6-4v4M7 7h10v4a5 5 0 0 1-10 0V7Zm5 9v5"/></svg><span id="connect-label" class="sr-only">Connect</span></button>
           <span id="state" class="state" data-state="idle" title="Disconnected" role="status" aria-live="polite">Disconnected</span>
         </div>
+        <button id="pair-toggle" class="icon-button pair-button" type="button" title="Pair this computer" aria-label="Pair this computer" aria-expanded="false" aria-controls="pair-controls" hidden>Pair</button>
         <div class="button-row" role="group" aria-label="Phone controls">
           <button class="icon-button" data-key="back" aria-label="Back" title="Back" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
           <button class="icon-button" data-key="home" aria-label="Home" title="Home" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></button>
@@ -59,6 +60,7 @@
             <h3>Escape</h3>
             <ul>
               <li>Escape first closes PIN entry and returns focus to its button. With PIN entry closed, Escape closes Help and returns focus to Help.</li>
+              <li>When pairing guidance is open, Escape closes it without sending Android Back.</li>
               <li>Escape then closes Details and returns focus to Details and text input.</li>
               <li>Escape that exits fullscreen does not send Android Back.</li>
               <li>With PIN entry, Help, and Details closed, and the phone screen focused, Escape sends Back.</li>
@@ -75,6 +77,12 @@
               <li>Supports ASCII and some accented letters, not every Unicode character.</li>
               <li>Limited to 300 UTF-8 bytes per send. A live N / 300 bytes counter uses the same check as Send.</li>
               <li>Over-limit text stays in the field so it can be shortened.</li>
+            </ul>
+            <h3>Wireless pairing</h3>
+            <ul>
+              <li>A connection error does not prove pairing was lost. Check the phone's Wireless debugging screen first.</li>
+              <li>If the phone offers Pair device with pairing code, select Pair this computer in the control rail. Enter its temporary code only in the masked browser field.</li>
+              <li>If endpoint discovery is unavailable, enter the address and pairing port shown on the phone. Pairing success alone does not prove video is visible.</li>
             </ul>
             <button id="close-help" type="button" aria-label="Close help">Close</button>
           </div>
@@ -97,6 +105,23 @@
               <p id="lock-status" class="text-help" role="status" aria-live="polite">Automatic detection is off. Manual entry is available.</p>
               <p id="pin-status" class="message" role="status" aria-live="polite"></p>
             </section>
+        <section id="pair-controls" class="details-panel pair-controls" role="dialog" aria-labelledby="pair-title" aria-describedby="pair-help" hidden>
+          <div class="pin-heading"><strong id="pair-title">Pair this computer</strong><button id="close-pair" type="button" aria-label="Close pairing guidance">Close</button></div>
+          <p id="pair-help" class="text-help">If wireless debugging lost its authorization, unlock the physical phone. In Developer options, open Wireless debugging, then choose Pair device with pairing code. Keep that phone screen open. Menus may vary by phone.</p>
+          <p class="text-help">DroidDock checks for a temporary pairing endpoint on this network. Pairing is not confirmed until the configured phone is verified, and controls stay off until video appears.</p>
+          <button id="pair-refresh" type="button" aria-label="Refresh pairing endpoint">Refresh endpoint</button>
+          <p id="pair-discovery-status" class="text-help" role="status" aria-live="polite">Open the phone's pairing screen, then refresh the endpoint.</p>
+          <form id="pair-form" class="text-form" autocomplete="off">
+            <label for="pair-endpoint">Phone address and pairing port (only if automatic discovery is unavailable)</label>
+            <input id="pair-endpoint" type="text" inputmode="url" placeholder="192.0.2.1:37123" maxlength="21" autocomplete="off" spellcheck="false" aria-describedby="pair-discovery-status">
+            <label for="pair-code">One-time pairing code shown on the phone</label>
+            <input id="pair-code" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" spellcheck="false" aria-describedby="pair-privacy">
+            <button id="pair-submit" type="submit" aria-label="Pair this computer using the one-time code">Pair this computer</button>
+          </form>
+          <div class="pin-actions"><button id="pair-cancel" type="button" aria-label="Cancel pairing attempt">Cancel</button></div>
+          <p id="pair-privacy" class="text-help">Enter the temporary code yourself. It is cleared after submit or whenever this panel closes; it is not saved or copied. A new code may be needed if the phone's pairing screen expires.</p>
+          <p id="pair-status" class="message" role="status" aria-live="polite"></p>
+        </section>
         <details id="more-controls" class="more-controls">
           <summary class="icon-button" aria-label="Details and text input" title="Details and text input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></summary>
           <div class="details-panel">

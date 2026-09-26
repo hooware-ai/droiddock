@@ -69,6 +69,24 @@ export function discoverPairingEndpoint(devicesText: string, servicesText: strin
   return { kind: "candidate", endpoint: pairing[0].value };
 }
 
+/** A bounded, read-only check for the current controller's pairing panel. */
+export async function checkPairingEndpoint(
+  adb: string, serial: string, signal: AbortSignal, runner: Runner = runCommand,
+): Promise<"available" | "manual-required" | "ambiguous" | "unavailable"> {
+  if (!adb || !/^[A-Za-z0-9]+$/.test(serial) || signal.aborted) return "unavailable";
+  try {
+    const options = { signal, timeoutMs: DISCOVERY_MS, maxOutputBytes: DISCOVERY_BYTES };
+    const devices = await runner(adb, ["devices", "-l"], options);
+    if (signal.aborted || devices.code !== 0) return "unavailable";
+    if (discoverPairingEndpoint(devices.stdout, "", serial).kind === "ambiguous") return "ambiguous";
+    const services = await runner(adb, ["mdns", "services"], options);
+    if (signal.aborted) return "unavailable";
+    if (services.code !== 0) return "manual-required";
+    const result = discoverPairingEndpoint(devices.stdout, services.stdout, serial);
+    return result.kind === "candidate" ? "available" : result.kind === "missing" ? "manual-required" : "ambiguous";
+  } catch { return "unavailable"; }
+}
+
 function confirmsPairing(result: CommandResult, selectedEndpoint: string): boolean {
   if (result.code !== 0) return false;
   const output = `${result.stdout}\n${result.stderr}`;

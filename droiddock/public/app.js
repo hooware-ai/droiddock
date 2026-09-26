@@ -39,6 +39,9 @@
   let escapeSawFullscreen = false;
   let suppressEscapeBack = false;
   let suppressEscapeTimer = 0;
+  let pairingAttempt = false;
+  let pairingDiscoveryPending = false;
+  let pairingReconnect = false;
   const available = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
 
   function canControl() {
@@ -66,6 +69,7 @@
     $('connect').setAttribute('aria-label', connectionLabel);
     $('connect').dataset.connected = String(next === 'connecting' || next === 'connected');
     $('state').title = label;
+    $('pair-toggle').hidden = next !== 'error' || !available;
     const detail = message || (next === 'connected' ? 'Focus a phone text field, then type or press Ctrl+V to paste. Tab stays in the browser. Fallback text input is available here for apps that block paste.' : 'Phone must be connected through ADB.');
     assignText($('message'), detail);
     $('message').classList.toggle('error', next === 'error');
@@ -73,6 +77,8 @@
     $('message').setAttribute('aria-live', hasFrame ? 'polite' : 'off');
     updateControls();
     if (next !== 'connected') closePin(false);
+    if (next !== 'error') closePair();
+    else updatePairingControls();
     syncLockSubscription();
     if (!hasFrame) {
       const title = next === 'connecting' || next === 'connected' ? 'Connecting to your phone…' : next === 'moved' ? 'Phone opened elsewhere.' : next === 'error' ? 'The phone is unavailable.' : 'Your phone, within reach.';
@@ -118,6 +124,71 @@
   function clearPin() {
     $('pin-input').value = '';
     $('pin-status').textContent = '';
+  }
+
+  function updatePairingControls() {
+    const ready = !$('pair-controls').hidden && state === 'error' && socket?.readyState === WebSocket.OPEN && !document.hidden && browserFocused;
+    $('pair-refresh').disabled = !ready || pairingAttempt || pairingDiscoveryPending;
+    $('pair-submit').disabled = !ready || pairingAttempt;
+    $('pair-code').disabled = !ready || pairingAttempt;
+    $('pair-endpoint').disabled = !ready || pairingAttempt;
+  }
+
+  function closePair(restoreFocus = false) {
+    const wasOpen = !$('pair-controls').hidden;
+    if (socket?.readyState === WebSocket.OPEN) {
+      try {
+        if (pairingDiscoveryPending) socket.send(JSON.stringify({ type: 'pairingDiscoveryCancel' }));
+        if (pairingAttempt) socket.send(JSON.stringify({ type: 'pairingCancel' }));
+      } catch { /* Closing the controller also cancels server work. Always clear local fields. */ }
+    }
+    pairingDiscoveryPending = false;
+    pairingAttempt = false;
+    $('pair-code').value = '';
+    $('pair-endpoint').value = '';
+    $('pair-controls').hidden = true;
+    $('pair-toggle').setAttribute('aria-expanded', 'false');
+    updatePairingControls();
+    if (wasOpen && restoreFocus) $('pair-toggle').focus({ preventScroll: true });
+    return wasOpen;
+  }
+
+  function refreshPairingEndpoint() {
+    if ($('pair-controls').hidden || state !== 'error' || pairingAttempt || pairingDiscoveryPending ||
+        socket?.readyState !== WebSocket.OPEN || document.hidden || !browserFocused) return;
+    pairingDiscoveryPending = true;
+    assignText($('pair-discovery-status'), 'Checking for the phone’s temporary pairing endpoint…');
+    updatePairingControls();
+    try { socket.send(JSON.stringify({ type: 'pairingDiscovery' })); }
+    catch {
+      pairingDiscoveryPending = false;
+      assignText($('pair-discovery-status'), 'Endpoint check is unavailable. Check the phone’s pairing screen.');
+      updatePairingControls();
+    }
+  }
+
+  function validPairingEndpoint(value) {
+    const match = /^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(value);
+    if (!match) return false;
+    const parts = match[1].split('.');
+    const port = Number(match[2]);
+    return parts.every(part => Number(part) <= 255 && String(Number(part)) === part) &&
+      Number(parts[0]) > 0 && Number(parts[0]) !== 127 && Number(parts[0]) < 224 &&
+      port > 0 && port <= 65535 && String(port) === match[2];
+  }
+
+  function openPair() {
+    if (document.hidden || !browserFocused || state !== 'error' || !available) return;
+    closePin(false);
+    $('more-controls').open = false;
+    $('help-controls').open = false;
+    $('pair-controls').hidden = false;
+    $('pair-toggle').setAttribute('aria-expanded', 'true');
+    assignText($('pair-status'), '');
+    updatePairingControls();
+    if (socket?.readyState === WebSocket.OPEN) refreshPairingEndpoint();
+    else connect(true);
+    $('pair-code').focus({ preventScroll: true });
   }
 
   function pinReady() {
@@ -237,6 +308,7 @@
 
   function holdEscapeFromSendingBack(event) {
     if (event.defaultPrevented) return true;
+    if (closePair(true)) { event.preventDefault(); return true; }
     if (closePin(true, true)) { event.preventDefault(); return true; }
     if (closeHelpControls()) {
       event.preventDefault();
@@ -279,6 +351,9 @@
 
   function fail(message) {
     clearTimeout(connectionTimer);
+    if (pairingReconnect) message = 'Pairing was verified, but phone video did not appear. Check the phone and select Connect again.';
+    closePair();
+    pairingReconnect = false;
     clearZoomShortcut();
     setMapZoom(false);
     const oldSocket = socket;
@@ -299,29 +374,40 @@
     return true;
   }
 
-  async function connect() {
-    if (!available) {
+  async function connect(pairingOnly = false) {
+    if (!available && !pairingOnly) {
       fail('Live video needs WebCodecs. Open DroidDock in a current Chrome or Edge browser on localhost.');
       return;
     }
     clearZoomShortcut();
     setMapZoom(false);
+    socket?.close();
+    socket = null;
     const currentGeneration = ++generation;
     pasteCapability = null;
     cancelFilePaste();
+    pairingReconnect = false;
     lockShown = false; lockState = 'unknown'; lockSuspended = false; lockSubscription = '';
     closePin(false);
     clearScreen();
-    setState('connecting');
-    $('device').textContent = 'Connecting to phone';
+    setState(pairingOnly ? 'error' : 'connecting', pairingOnly ? 'Follow the phone’s pairing steps in the panel.' : '');
+    $('device').textContent = pairingOnly ? 'Phone pairing' : 'Connecting to phone';
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/stream?takeover=1`);
     socket = ws;
     ws.binaryType = 'arraybuffer';
-    connectionTimer = setTimeout(() => {
+    if (!pairingOnly) connectionTimer = setTimeout(() => {
       if (socket === ws && !hasFrame) fail('No video arrived. Check that your phone is connected and unlocked, then connect again.');
     }, 30000);
     ws.onopen = () => {
-      if (socket === ws && currentGeneration === generation) { ws.send(JSON.stringify({ type: 'connect' })); syncLockSubscription(); }
+      if (socket === ws && currentGeneration === generation) {
+        if (pairingOnly) {
+          updatePairingControls();
+          if (!$('pair-controls').hidden) $('pair-code').focus({ preventScroll: true });
+          refreshPairingEndpoint();
+        }
+        else ws.send(JSON.stringify({ type: 'connect' }));
+        syncLockSubscription();
+      }
       else ws.close();
     };
     ws.onmessage = (event) => {
@@ -343,6 +429,41 @@
             return;
           } else if (message.type === 'lockState') {
             receiveLockState(message);
+          } else if (message.type === 'pairingDiscovery') {
+            if (!pairingDiscoveryPending || $('pair-controls').hidden) return;
+            pairingDiscoveryPending = false;
+            assignText($('pair-discovery-status'), message.result === 'available'
+              ? 'A temporary pairing endpoint was found. Leave the address field blank.'
+              : message.result === 'manual-required'
+                ? 'Automatic discovery found no endpoint. Enter the address and pairing port shown on the phone.'
+                : message.result === 'ambiguous'
+                  ? 'Pairing advertisements conflict. Close other pairing screens and refresh; a manual address cannot override this evidence.'
+                  : 'Endpoint check is unavailable. Check the phone’s pairing screen; you may enter its address and port manually.');
+            updatePairingControls();
+          } else if (message.type === 'pairingResult') {
+            if (!pairingAttempt || $('pair-controls').hidden) return;
+            pairingAttempt = false;
+            updatePairingControls();
+            if (message.result === 'identity-verified') {
+              closePair();
+              pairingReconnect = true;
+              clearScreen();
+              setState('connecting', 'Pairing verified for the configured phone. Waiting for its live screen…');
+              connectionTimer = setTimeout(() => {
+                if (socket === ws && !hasFrame) fail('Pairing was verified, but no phone video appeared. Check the phone and select Connect again.');
+              }, 30000);
+              ws.send(JSON.stringify({ type: 'connect' }));
+            } else {
+              const feedback = {
+                failed: 'Pairing was not accepted. Check the phone’s current code and try again.',
+                expired: 'The pairing window expired. Open a new pairing code on the phone and try again.',
+                'paired-unverified': 'Pairing may have succeeded, but the configured phone could not be verified. Check the phone before reconnecting.',
+                unavailable: 'Pairing is unavailable. Check Wireless debugging and the address and pairing port, then try again.',
+                busy: 'Another pairing attempt is finishing. Wait before trying again.',
+                cancelled: 'Pairing was cancelled.',
+              };
+              assignText($('pair-status'), feedback[message.result] || 'Pairing could not be confirmed. Check the phone before trying again.');
+            }
           } else if (message.type === 'pasteCapability') {
             pasteCapability = typeof message.value === 'string' && /^[a-f0-9]{64}$/.test(message.value) ? message.value : null;
           } else if (message.type === 'status') {
@@ -351,14 +472,23 @@
             // The greeting describes the previous attempt, including a retained
             // cleanup error. Wait for this socket's connect result before failing.
             if (message.snapshot === true) return;
-            if (message.state === 'error') { fail(message.message || 'The phone connection failed. Check ADB and connect again.'); return; }
+            if (message.state === 'error') {
+              clearTimeout(connectionTimer);
+              clearScreen();
+              setState('error', pairingReconnect
+                ? 'Pairing was verified, but the phone video did not open. Check the phone and select Connect again.'
+                : message.message || 'The phone connection failed. Check ADB and connect again.');
+              pairingReconnect = false;
+              return;
+            }
             if (message.state === 'idle') {
               // A newly attached socket receives the pre-connect server snapshot.
               if (state === 'connecting' && !hasFrame) return;
               fail(message.message || 'The phone disconnected. Check its connection and connect again.');
               return;
             }
-            if (message.state === 'connected' || message.state === 'connecting') setState(message.state, message.message);
+            if (message.state === 'connected' && !hasFrame) setState('connecting', 'Waiting for the live screen.');
+            else if (message.state === 'connected' || message.state === 'connecting') setState(message.state, message.message);
           } else if (message.type === 'inputError') {
             $('message').textContent = message.message || 'The phone could not receive that input. Try again.';
             $('message').classList.add('error');
@@ -387,6 +517,7 @@
     pasteCapability = null;
     cancelFilePaste();
     oldSocket?.close();
+    closePair();
     clearScreen();
     $('device').textContent = 'Phone disconnected';
     setState('idle');
@@ -436,7 +567,10 @@
               fitScreen();
             }
             clearTimeout(connectionTimer);
-            if (firstFrame || state !== 'connected') setState('connected');
+            if (firstFrame || state !== 'connected') {
+              setState('connected', pairingReconnect ? 'Phone video is visible after re-pairing.' : '');
+              pairingReconnect = false;
+            }
             else updateControls();
           } finally { frame.close(); }
         },
@@ -745,6 +879,47 @@
     }
     syncLockSubscription();
   });
+  $('pair-toggle').addEventListener('click', () => {
+    if (!closePair(true)) openPair();
+  });
+  $('close-pair').addEventListener('click', () => closePair(true));
+  $('pair-refresh').addEventListener('click', refreshPairingEndpoint);
+  $('pair-cancel').addEventListener('click', () => {
+    if (socket?.readyState === WebSocket.OPEN) {
+      try {
+        if (pairingAttempt) socket.send(JSON.stringify({ type: 'pairingCancel' }));
+        if (pairingDiscoveryPending) socket.send(JSON.stringify({ type: 'pairingDiscoveryCancel' }));
+      } catch { /* The controller closes its in-flight work on disconnect. */ }
+    }
+    pairingAttempt = false;
+    pairingDiscoveryPending = false;
+    $('pair-code').value = '';
+    assignText($('pair-status'), 'Pairing cancelled. Nothing else was sent.');
+    updatePairingControls();
+  });
+  $('pair-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const code = $('pair-code').value;
+    const manualEndpoint = $('pair-endpoint').value;
+    $('pair-code').value = '';
+    if ($('pair-controls').hidden || state !== 'error' || socket?.readyState !== WebSocket.OPEN ||
+        document.hidden || !browserFocused || pairingAttempt) return;
+    if (!/^[0-9]{6}$/.test(code)) {
+      assignText($('pair-status'), 'Enter the current six-digit code shown on the phone. Nothing was sent.');
+      return;
+    }
+    if (manualEndpoint && !validPairingEndpoint(manualEndpoint)) {
+      assignText($('pair-status'), 'Enter a valid phone address and pairing port, or leave it blank for automatic discovery. Nothing was sent.');
+      return;
+    }
+    pairingAttempt = true;
+    pairingDiscoveryPending = false;
+    updatePairingControls();
+    assignText($('pair-status'), 'Pairing this computer…');
+    try { socket.send(JSON.stringify({ type: 'pairingRequest', code, ...(manualEndpoint ? { manualEndpoint } : {}) })); }
+    catch { pairingAttempt = false; updatePairingControls(); assignText($('pair-status'), 'Delivery is uncertain. Check the phone before trying again.'); }
+  });
+  for (const name of ['paste', 'copy', 'cut', 'drop']) $('pair-code').addEventListener(name, (event) => event.preventDefault());
   $('more-controls').addEventListener('toggle', () => {
     if ($('more-controls').open) {
       closePin(true);
@@ -761,14 +936,26 @@
     event.preventDefault();
     closeHelpControls();
   });
-  window.addEventListener('blur', () => { browserFocused = false; closePin(false); syncLockSubscription(); });
+  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); syncLockSubscription(); });
   $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
-  window.addEventListener('pagehide', () => { closePin(false); disconnect(); });
-  $('connect').addEventListener('click', () => { if (socket) disconnect(); else connect(); });
+  window.addEventListener('pagehide', () => { closePin(false); closePair(); disconnect(); });
+  $('connect').addEventListener('click', () => {
+    if (socket?.readyState === WebSocket.OPEN && state === 'error') {
+      closePair();
+      clearScreen();
+      setState('connecting');
+      const current = socket;
+      connectionTimer = setTimeout(() => {
+        if (socket === current && !hasFrame) fail('No video arrived. Check the phone and select Connect again.');
+      }, 30000);
+      current.send(JSON.stringify({ type: 'connect' }));
+    } else if (socket) disconnect(); else connect();
+  });
   document.addEventListener('pointerdown', (event) => {
     if (!$('more-controls').contains(event.target)) $('more-controls').open = false;
     if (!$('pin-controls').contains(event.target) && !$('pin-toggle').contains(event.target)) closePin(true);
+    if (!$('pair-controls').contains(event.target) && !$('pair-toggle').contains(event.target)) closePair();
     const help = $('help-controls');
     if (!help.contains(event.target)) help.open = false;
   });
@@ -808,7 +995,7 @@
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { clearZoomShortcut(); cancelZoom(); releasePointer(); closePin(false); }
+    if (document.hidden) { clearZoomShortcut(); cancelZoom(); releasePointer(); closePin(false); closePair(); }
     syncLockSubscription();
   });
   fetch('/api/status').then((response) => {

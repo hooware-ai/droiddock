@@ -29,6 +29,7 @@ async function fixture(t, sessionMode = 'error') {
   await copyFile('dist/droiddock/pairing.js', join(folder, 'pairing-real.js'));
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(root, 'pair-mode'), 'success');
+  await writeFile(join(root, 'discovery-mode'), 'available');
   await writeFile(join(root, 'verify-mode'), 'success');
   await writeFile(join(root, 'session-mode'), sessionMode);
   await writeFile(join(folder, 'pairing.js'), `
@@ -36,6 +37,15 @@ async function fixture(t, sessionMode = 'error') {
     import { fileURLToPath } from 'node:url';
     import { join } from 'node:path';
     export { parsePairingRequest } from './pairing-real.js';
+    export async function checkPairingEndpoint(_adb, _serial, signal) {
+      await appendFile(join(root, 'events'), 'discovery-start\\n');
+      const mode = (await readFile(join(root, 'discovery-mode'), 'utf8')).trim();
+      if (mode !== 'wait-abort') return mode;
+      return new Promise(resolve => {
+        const aborted = () => { void appendFile(join(root, 'events'), 'discovery-abort\\n'); resolve('unavailable'); };
+        if (signal.aborted) aborted(); else signal.addEventListener('abort', aborted, { once: true });
+      });
+    }
     const root = fileURLToPath(new URL('../../', import.meta.url));
     export async function pairConfiguredPhone(_adb, _serial, request) {
       await appendFile(join(root, 'events'), 'pair-start\\n');
@@ -118,6 +128,32 @@ async function recoverable(peer, bridge) {
   peer.send({ type: 'connect' });
   await until(async () => (await bridge.status()).state === 'error', 'recoverable connection state');
 }
+
+test('endpoint discovery is controller-only, coarse, cancellable, and never starts pairing', { timeout: 15000 }, async t => {
+  const bridge = await fixture(t);
+  const owner = await bridge.open();
+  await recoverable(owner, bridge);
+  for (const input of [
+    { type: 'pairingDiscovery', extra: 'SYNTHETIC_PRIVATE' },
+    { type: 'pairingDiscoveryCancel', extra: 'SYNTHETIC_PRIVATE' },
+  ]) owner.send(input);
+  await until(() => owner.messages.filter(message => message.type === 'inputError').length === 2, 'strict discovery shape');
+  assert.equal((await bridge.events()).length, 0);
+  owner.send({ type: 'pairingDiscovery' });
+  await until(() => owner.messages.some(message => message.type === 'pairingDiscovery' && message.result === 'available'), 'coarse endpoint result');
+  assert.deepEqual(await bridge.events(), ['discovery-start']);
+  assert.doesNotMatch(JSON.stringify(owner.messages), /SYNTHETIC_PRIVATE|192\.0\.2|37002/);
+  await writeFile(join(bridge.root, 'discovery-mode'), 'wait-abort');
+  owner.send({ type: 'pairingDiscovery' });
+  await until(async () => (await bridge.events()).filter(value => value === 'discovery-start').length === 2, 'pending discovery');
+  owner.send({ type: 'pairingDiscovery' });
+  await until(() => owner.messages.some(message => message.type === 'pairingDiscovery' && message.result === 'busy'), 'overlap refusal');
+  owner.send({ type: 'pairingDiscoveryCancel' });
+  await until(async () => (await bridge.events()).includes('discovery-abort'), 'discovery cancellation');
+  await delay(30);
+  assert.deepEqual(owner.messages.filter(message => message.type === 'pairingDiscovery').map(message => message.result), ['available', 'busy']);
+  assert.equal((await bridge.events()).includes('pair-start'), false);
+});
 
 test('pairing is a narrow controller-only message with sanitized validation and identity results', { timeout: 15000 }, async t => {
   const bridge = await fixture(t);

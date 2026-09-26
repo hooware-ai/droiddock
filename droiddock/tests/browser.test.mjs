@@ -44,7 +44,9 @@ test('browser retries after an old error snapshot but displays a current connect
   socket.receive({ type: 'status', state: 'connecting', message: 'Retrying cleanup.' });
   assert.equal(element('message').textContent, 'Retrying cleanup.');
   socket.receive({ type: 'status', state: 'error', message: 'Current connection failed.' });
-  assert.equal(socket.closed, true);
+  assert.equal(socket.closed, undefined, 'a recoverable failure retains the controller for pairing');
   assert.equal(element('state').dataset.state, 'error');
   assert.equal(element('message').textContent, 'Current connection failed.');
+  await element('connect').handlers.click();
+  assert.deepEqual(socket.sent.at(-1), { type: 'connect' }, 'Connect retries on the same controller');
 });

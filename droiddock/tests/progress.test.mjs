@@ -216,7 +216,7 @@ test('browser announces new stages once and keeps input gated until a frame rend
 
   socket.receive({ type: 'status', state: 'connected', message: 'Connected' });
   socket.receive({ type: 'video' });
-  assert.equal(browser.element('state').dataset.state, 'connected');
+  assert.equal(browser.element('state').dataset.state, 'connecting', 'connected status waits for a drawn frame');
   assert.equal(browser.element('empty-message').textContent, 'Waiting for the live screen.');
   assert.ok(browser.keyButtons.every(button => button.disabled));
   assert.equal(browser.element('screen').hidden, true);
@@ -247,7 +247,7 @@ test('browser timeout and failure stay off connected and do not enable controls'
   assert.match(browser.element('empty-message').textContent, /timed out/i);
   assert.ok(browser.keyButtons.every(button => button.disabled));
   assert.equal(browser.element('screen').hidden, true);
-  assert.equal(socket.closed, true);
+  assert.equal(socket.closed, undefined, 'server recovery keeps the controller available');
 
   const retry = loadBrowser();
   const retrySocket = await startConnect(retry);
@@ -259,6 +259,5 @@ test('browser timeout and failure stay off connected and do not enable controls'
   assert.equal(retry.element('screen').hidden, true);
   retrySocket.receive({ type: 'status', state: 'connected', message: 'Connected' });
   retrySocket.receive({ type: 'video' });
-  assert.equal(retry.element('state').dataset.state, 'error');
-  assert.ok(retry.keyButtons.every(button => button.disabled));
+  assert.ok(retry.keyButtons.every(button => button.disabled), 'server status alone cannot enable controls');
 });

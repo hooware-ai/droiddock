@@ -389,7 +389,7 @@ async function startupBridge(t) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
   // Startup tests replace the process module; pairing is not invoked in this fixture.
-  await writeFile(join(folder, 'pairing.js'), 'export const parsePairingRequest = () => undefined; export async function pairConfiguredPhone() { return "unavailable"; }');
+  await writeFile(join(folder, 'pairing.js'), 'export const parsePairingRequest = () => undefined; export async function pairConfiguredPhone() { return "unavailable"; } export async function checkPairingEndpoint() { return "unavailable"; }');
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule({
     commandLog: join(root, 'commands.log'),
     releaseDir: root,
