@@ -511,7 +511,9 @@
     zoomWheelDelta = 0;
     if (!enabled) lastZoomAt = 0;
     $('map-zoom').setAttribute('aria-pressed', String(enabled));
-    $('map-zoom').title = enabled ? 'Map zoom mode on; wheel pinches the phone screen' : 'Map zoom mode off; wheel scrolls normally unless Left Ctrl is held';
+    $('map-zoom').title = enabled
+      ? 'Map zoom on. Wheel zooms the phone. Shortcut when off: Left Ctrl + wheel.'
+      : 'Map zoom off. Shortcut: Left Ctrl + wheel over the phone.';
   }
 
   function startZoom(direction, anchor) {

@@ -16,10 +16,12 @@ async function connected() {
 test('map zoom is opt-in; wheel pinch has two bounded pointers and leaves normal scrolling intact', async () => {
   const { browser, socket, screen, button } = await connected();
   assert.equal(button.disabled, false);
+  assert.equal(button.title, 'Map zoom off. Shortcut: Left Ctrl + wheel over the phone.');
   screen.handlers.wheel(wheel(-120));
   assert.equal(socket.sent.at(-1).type, 'scroll');
   button.handlers.click();
   assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.equal(button.title, 'Map zoom on. Wheel zooms the phone. Shortcut when off: Left Ctrl + wheel.');
   const start = socket.sent.length;
   const event = wheel(-120); screen.handlers.wheel(event);
   assert.equal(event.prevented, true);
@@ -37,6 +39,7 @@ test('map zoom is opt-in; wheel pinch has two bounded pointers and leaves normal
   }
   button.handlers.click();
   assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.equal(button.title, 'Map zoom off. Shortcut: Left Ctrl + wheel over the phone.');
   screen.handlers.wheel(wheel(120));
   assert.equal(socket.sent.at(-1).type, 'scroll');
 });
