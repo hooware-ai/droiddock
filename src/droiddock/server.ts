@@ -145,9 +145,6 @@ const http = createServer(async (req, res) => {
         reply(res, 403, { error: "Only the current connected phone view can paste files." }); return;
       }
       if (pasteAbort) { reply(res, 409, { error: "Another file paste is still running." }); return; }
-      if (hostPasteCleanup.pending && !(await hostPasteCleanup.retry())) {
-        reply(res, 503, { error: "Previous temporary file cleanup is pending. Paste again after cleanup succeeds." }); return;
-      }
       const owner = client, current = session, controller = new AbortController();
       pasteAbort = controller;
       const timeout = setTimeout(() => controller.abort(), 75000);
@@ -156,6 +153,10 @@ const http = createServer(async (req, res) => {
       let responseCode = 200;
       let response: { message?: string; error?: string } = {};
       try {
+        if (hostPasteCleanup.pending && !(await hostPasteCleanup.retry()))
+          throw new PasteFileError("Previous temporary file cleanup is pending. Paste again after cleanup succeeds.", 503);
+        if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
+          throw new PasteFileError("The phone view changed. Paste again from the current view.", 409);
         const mime = pasteMime(req.headers["content-type"]);
         const staged = await stagePasteFile(req, controller.signal, path => hostPasteCleanup.track(path));
         if (client !== owner || session !== current || state !== "connected" || controller.signal.aborted)
@@ -194,11 +195,11 @@ const http = createServer(async (req, res) => {
       }
       if (req.url === "/api/disconnect") { await stop(); reply(res, 200, status()); return; }
       if (req.url === "/api/shutdown") {
+        if (cleanupSessions.size) { reply(res, 409, { error: cleanupMessage }); return; }
+        if (client || session || state === "connecting" || state === "connected") { reply(res, 409, { error: "Close the controlling browser tab before restarting DroidDock." }); return; }
         if (hostPasteCleanup.pending && !(await hostPasteCleanup.retry())) {
           reply(res, 409, { error: "Temporary file cleanup is pending. Retry shutdown after cleanup succeeds." }); return;
         }
-        if (cleanupSessions.size) { reply(res, 409, { error: cleanupMessage }); return; }
-        if (client || session || state === "connecting" || state === "connected") { reply(res, 409, { error: "Close the controlling browser tab before restarting DroidDock." }); return; }
         reply(res, 200, { app: "DroidDock", stopping: true }); void shutdown(); return;
       }
       reply(res, 404, { error: "Unknown action." }); return;

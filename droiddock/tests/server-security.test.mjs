@@ -19,13 +19,14 @@ async function until(check) {
 }
 
 // All sessions are file-gated stubs. These tests never discover or control devices.
-async function fixture(t, implementation) {
+async function fixture(t, implementation, filePasteImplementation) {
   const base = resolve('.setup');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'security-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
   for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  if (filePasteImplementation) await writeFile(join(folder, 'file-paste.js'), filePasteImplementation);
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(folder, 'session.js'), implementation);
   const reservation = createServer();
@@ -124,6 +125,33 @@ test('rich paste requires current controller capability and releases the host st
   assert.equal(result.mime, 'image/png');
   assert.deepEqual(result.bytes, [1, 2, 3]);
   await assert.rejects(readFile(result.path));
+});
+
+test('cleanup retry reserves paste ownership before concurrent HTTP requests', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    export class ScrcpySession {
+      constructor(root, onEvent) { this.onEvent = onEvent; }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      async pasteFile() { return false; }
+      async stop() {}
+    }
+  `, `
+    export class PasteFileError extends Error { constructor(message, status) { super(message); this.status = status; } }
+    export class HostPasteCleanup {
+      pending = true;
+      track() {}
+      async retry() { await new Promise(done => setTimeout(done, 50)); this.pending = false; return true; }
+    }
+    export function pasteMime() { return 'image/png'; }
+    export async function stagePasteFile(req) { for await (const chunk of req) {} return 'SYNTHETIC'; }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  const token = await until(() => bridge.messages.find(message => message.type === 'pasteCapability')?.value);
+  const headers = { origin: bridge.origin, 'x-droiddock': '1', 'x-paste-capability': token, 'content-type': 'image/png' };
+  const url = `${bridge.origin}/api/paste-file`;
+  const statuses = await Promise.all([1, 2].map(() => fetch(url, { method:'POST', headers, body:Buffer.from([1]) }).then(response => response.status)));
+  assert.deepEqual(statuses.sort(), [200, 409]);
 });
 
 test('only the initial error greeting is marked as a snapshot, never current attempt failures', { timeout: 10000 }, async t => {
