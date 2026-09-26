@@ -28,6 +28,7 @@
   let pendingMove = null;
   let moveAnimation = 0;
   let mapZoom = false;
+  let leftCtrlHeld = false;
   let zoomGesture = null;
   let zoomWheelDelta = 0;
   let lastZoomAt = 0;
@@ -50,6 +51,7 @@
   }
 
   function setState(next, message = '') {
+    if (next !== 'connected') clearZoomShortcut();
     if (next !== 'connected' && state === 'connected') cancelZoom();
     if (next === 'idle' || next === 'error' || next === 'moved') setMapZoom(false);
     state = next;
@@ -277,6 +279,7 @@
 
   function fail(message) {
     clearTimeout(connectionTimer);
+    clearZoomShortcut();
     setMapZoom(false);
     const oldSocket = socket;
     socket = null;
@@ -301,6 +304,7 @@
       fail('Live video needs WebCodecs. Open DroidDock in a current Chrome or Edge browser on localhost.');
       return;
     }
+    clearZoomShortcut();
     setMapZoom(false);
     const currentGeneration = ++generation;
     pasteCapability = null;
@@ -327,6 +331,7 @@
           const message = JSON.parse(event.data);
           if (message.type === 'moved') {
             clearTimeout(connectionTimer);
+            clearZoomShortcut();
             setMapZoom(false);
             ++generation;
             socket = null;
@@ -372,6 +377,7 @@
   }
 
   async function disconnect() {
+    clearZoomShortcut();
     setMapZoom(false);
     releasePointer();
     ++generation;
@@ -492,13 +498,20 @@
     send({ type: 'touch', pointerId: 1, action: 1, ...active.first });
   }
 
+  function clearZoomShortcut() {
+    leftCtrlHeld = false;
+    if (!mapZoom) cancelZoom();
+    zoomWheelDelta = 0;
+    lastZoomAt = 0;
+  }
+
   function setMapZoom(enabled) {
     if (!enabled) cancelZoom();
     mapZoom = enabled;
     zoomWheelDelta = 0;
     if (!enabled) lastZoomAt = 0;
     $('map-zoom').setAttribute('aria-pressed', String(enabled));
-    $('map-zoom').title = enabled ? 'Map zoom mode on; wheel pinches the phone screen' : 'Map zoom mode off; wheel scrolls normally';
+    $('map-zoom').title = enabled ? 'Map zoom mode on; wheel pinches the phone screen' : 'Map zoom mode off; wheel scrolls normally unless Left Ctrl is held';
   }
 
   function startZoom(direction, anchor) {
@@ -514,7 +527,7 @@
     if (!send({ type: 'touch', pointerId: 1, action: 0, ...active.first }) ||
         !send({ type: 'touch', pointerId: 2, action: 0, ...active.second })) { cancelZoom(); return; }
     const move = (fraction) => {
-      if (zoomGesture !== active || active.generation !== generation || !mapZoom || !canControl() || document.hidden || !browserFocused) { cancelZoom(); return false; }
+      if (zoomGesture !== active || active.generation !== generation || !(mapZoom || leftCtrlHeld) || !canControl() || document.hidden || !browserFocused) { cancelZoom(); return false; }
       const radius = Math.round(startRadius + (endRadius - startRadius) * fraction);
       active.first = point(radius, -1);
       active.second = point(radius, 1);
@@ -548,13 +561,14 @@
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('lostpointercapture', releasePointer);
-  window.addEventListener('blur', () => { cancelZoom(); releasePointer(); });
+  window.addEventListener('blur', () => { clearZoomShortcut(); cancelZoom(); releasePointer(); });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('wheel', (event) => {
     if (!canControl()) return;
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
-    if (mapZoom) {
+    if (leftCtrlHeld && !event.ctrlKey) clearZoomShortcut();
+    if (mapZoom || (leftCtrlHeld && event.ctrlKey)) {
       if (pointer !== null || zoomGesture || !browserFocused || document.hidden || !Number.isFinite(event.deltaY * unit)) return;
       zoomWheelDelta = Math.max(-240, Math.min(240, zoomWheelDelta + event.deltaY * unit));
       if (Math.abs(zoomWheelDelta) < 60 || Date.now() - lastZoomAt < 120) return;
@@ -757,9 +771,11 @@
     if (!help.contains(event.target)) help.open = false;
   });
   document.addEventListener('keydown', (event) => {
+    if (event.code === 'ControlLeft' && !event.isComposing) leftCtrlHeld = true;
     if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
     holdEscapeFromSendingBack(event);
   });
+  document.addEventListener('keyup', (event) => { if (event.code === 'ControlLeft') clearZoomShortcut(); });
   if (fullscreenButton) {
     if (fullscreenApiAvailable()) {
       fullscreenButton.hidden = false;
@@ -790,7 +806,7 @@
   }).observe($('message'), { childList: true, attributes: true, attributeFilter: ['class'] });
   new ResizeObserver(fitScreen).observe($('screen-area'));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { cancelZoom(); releasePointer(); closePin(false); }
+    if (document.hidden) { clearZoomShortcut(); cancelZoom(); releasePointer(); closePin(false); }
     syncLockSubscription();
   });
   fetch('/api/status').then((response) => {
