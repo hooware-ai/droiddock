@@ -31,7 +31,7 @@ function endpoint(value: string): { value: string; address: string } | undefined
 type Discovery = { kind: "candidate"; endpoint: string } | { kind: "missing" | "ambiguous" };
 
 // Mirror the conservative #41 recovery evidence: one configured connect row,
-// one pairing row, and the same canonical IPv4 address. No identity is claimed.
+// one code-pairing row, and the same canonical IPv4 address. No identity is claimed.
 export function discoverPairingEndpoint(devicesText: string, servicesText: string, serial: string): Discovery {
   if (!/^[A-Za-z0-9]+$/.test(serial)) return { kind: "ambiguous" };
   if (devicesText.split(/\r?\n/).some(line => line.startsWith(serial) && /^\s+\S+/.test(line.slice(serial.length)))) {
@@ -43,7 +43,10 @@ export function discoverPairingEndpoint(devicesText: string, servicesText: strin
     const line = row.trim();
     const fields = line.split(/\s+/);
     const configured = fields[0]?.startsWith(`adb-${serial}-`) && /^_adb-tls-connect\._tcp\.?$/.test(fields[1] ?? "");
-    const pair = /^_adb-tls-pairing\._tcp\.?$/.test(fields[1] ?? "");
+    const pairingService = /^_adb-tls-pairing\._tcp\.?$/.test(fields[1] ?? "");
+    const pair = pairingService && fields[0]?.startsWith("adb-");
+    // QR pairing advertises studio-* and cannot accept a six-digit pairing code.
+    if (pairingService && !pair) return { kind: "ambiguous" };
     if (!configured && !pair) continue;
     const parsed = fields.length === 3 ? endpoint(fields[2]) : undefined;
     if (!parsed) return { kind: "ambiguous" };
@@ -79,6 +82,15 @@ export async function pairConfiguredPhone(
   attemptActive = true;
   const controller = new AbortController();
   let expired = false;
+  const deadline = performance.now() + ATTEMPT_MS;
+  const isExpired = () => expired || performance.now() >= deadline ||
+    (request.expiresAtMs !== undefined && Date.now() >= request.expiresAtMs);
+  const stopIfExpired = () => {
+    if (!isExpired()) return false;
+    expired = true;
+    controller.abort();
+    return true;
+  };
   const cancel = () => controller.abort();
   request.signal?.addEventListener("abort", cancel, { once: true });
   const remaining = request.expiresAtMs === undefined ? ATTEMPT_MS : Math.min(ATTEMPT_MS, request.expiresAtMs - Date.now());
@@ -87,10 +99,12 @@ export async function pairConfiguredPhone(
     const run = (args: string[], maxOutputBytes: number, timeoutMs: number, input?: string) =>
       runner(adb, args, { signal: controller.signal, timeoutMs, maxOutputBytes, input });
     const devices = await run(["devices", "-l"], DISCOVERY_BYTES, DISCOVERY_MS);
+    if (stopIfExpired()) return "expired";
     if (controller.signal.aborted) return expired ? "expired" : "unavailable";
     if (devices.code !== 0) return "unavailable";
     if (discoverPairingEndpoint(devices.stdout, "", serial).kind === "ambiguous") return "unavailable";
     const services = await run(["mdns", "services"], DISCOVERY_BYTES, DISCOVERY_MS);
+    if (stopIfExpired()) return "expired";
     if (controller.signal.aborted) return expired ? "expired" : "unavailable";
     const discovered = services.code === 0
       ? discoverPairingEndpoint(devices.stdout, services.stdout, serial)
@@ -99,16 +113,19 @@ export async function pairConfiguredPhone(
     if (discovered.kind === "candidate" && manual && discovered.endpoint !== manual.value) return "unavailable";
     const selectedEndpoint = discovered.kind === "candidate" ? discovered.endpoint : manual?.value;
     if (!selectedEndpoint) return "unavailable";
+    if (stopIfExpired()) return "expired";
     const inputOptions = { value: `${request.code}\n` };
     try {
       // ADB reads the code from stdin when the fixed pair command has no code argument.
       const result = await run(["pair", selectedEndpoint], PAIR_BYTES, ATTEMPT_MS, inputOptions.value);
+      if (stopIfExpired()) return "expired";
       if (controller.signal.aborted) return expired ? "expired" : "unavailable";
       return confirmsPairing(result, selectedEndpoint) ? "paired" : "failed";
     } finally {
       inputOptions.value = "";
     }
   } catch {
+    if (stopIfExpired()) return "expired";
     return expired ? "expired" : "unavailable";
   } finally {
     clearTimeout(timer);

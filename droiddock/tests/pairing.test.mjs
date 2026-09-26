@@ -29,6 +29,7 @@ test('one matching mDNS pairing service yields only a candidate endpoint', () =>
     services.replace('192.0.2.10:37002', '192.0.2.11:37002'),
     services.replace('192.0.2.10:37002', '192.0.2.10:99999'),
     services.replace('192.0.2.10:37002', '192.0.2.010:37002'),
+    services.replace('adb-guid-y _adb-tls-pairing', 'studio-qr-y _adb-tls-pairing'),
   ]) assert.deepEqual(discoverPairingEndpoint(devices, sample, serial), { kind: 'ambiguous' });
   assert.deepEqual(discoverPairingEndpoint(`${serial} unauthorized`, services, serial), { kind: 'ambiguous' });
 });
@@ -65,6 +66,9 @@ test('manual endpoint is a deliberate fallback, but cannot override contradictor
   assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', manualEndpoint: pairEndpoint }, ambiguous.run), 'unavailable');
   const mismatch = fakeAdb();
   assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', manualEndpoint: `${address}:37004` }, mismatch.run), 'unavailable');
+  const qr = fakeAdb({ serviceText: services.replace('adb-guid-y _adb-tls-pairing', 'studio-qr-y _adb-tls-pairing') });
+  assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', manualEndpoint: pairEndpoint }, qr.run), 'unavailable');
+  assert.equal(qr.calls.some(call => call.args[0] === 'pair'), false);
   const listed = fakeAdb({ deviceText: `${serial} unauthorized`, serviceCode: 1 });
   assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', manualEndpoint: pairEndpoint }, listed.run), 'unavailable');
   for (const endpoint of ['localhost:37002', '127.0.0.1:37002', '192.0.2.999:37002', '192.0.2.10:0', '192.0.2.10:37002 extra']) {
@@ -125,6 +129,20 @@ test('the fixed deadline and a supplied code expiry cancel a hanging attempt', a
   const start = Date.now();
   assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', expiresAtMs: start + 40 }, pending), 'expired');
   assert.ok(Date.now() - start < 1000);
+});
+
+test('an expired code cannot start pairing when the event loop delays the timer', async () => {
+  const calls = [];
+  const blockedDiscovery = async (command, args) => {
+    calls.push(args[0]);
+    if (args[0] === 'mdns') {
+      const until = Date.now() + 40;
+      while (Date.now() < until) { /* simulate a blocked event loop */ }
+    }
+    return { command, args, code: 0, stdout: args[0] === 'devices' ? devices : services, stderr: '', durationMs: 1 };
+  };
+  assert.equal(await pairConfiguredPhone('synthetic-adb', serial, { code: '123456', expiresAtMs: Date.now() + 20 }, blockedDiscovery), 'expired');
+  assert.deepEqual(calls, ['devices', 'mdns']);
 });
 
 test('late discovery and pair results cannot advance after cancellation', async () => {
