@@ -4,10 +4,22 @@ param()
 $ErrorActionPreference = 'Stop'
 $droidRoot = Split-Path -Parent $PSScriptRoot
 $configPath = Join-Path $droidRoot 'config.local.json'
-if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw 'Configure DroidDock and the intended phone before installing the paste helper.' }
-$config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-if (-not $config.deviceSerial) { throw 'The configured permanent phone identity is missing.' }
-$adb = if ($config.adb) { [string]$config.adb } else { 'adb' }
+$config = [pscustomobject]@{}
+if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+  try { $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+  catch { throw 'Invalid config.local.json. Check the local configuration format.' }
+  if ($config -isnot [pscustomobject] -or
+      ($null -ne $config.deviceSerial -and $config.deviceSerial -isnot [string]) -or
+      ($null -ne $config.adb -and $config.adb -isnot [string])) {
+    throw 'Invalid config.local.json. Check the local configuration format.'
+  }
+}
+$serial = if ($null -ne $env:DROIDDOCK_DEVICE_SERIAL) { $env:DROIDDOCK_DEVICE_SERIAL } else { [string]$config.deviceSerial }
+if (-not $serial -or $serial -eq 'YOUR_DEVICE_SERIAL' -or $serial -cnotmatch '^[A-Za-z0-9]+$') {
+  throw 'Set a valid permanent phone identity in config.local.json or DROIDDOCK_DEVICE_SERIAL.'
+}
+$adb = if ($null -ne $env:DROIDDOCK_ADB) { $env:DROIDDOCK_ADB } elseif ($null -ne $config.adb) { [string]$config.adb } else { 'adb' }
+if (-not $adb.Trim()) { throw 'Set an ADB executable in config.local.json or DROIDDOCK_ADB.' }
 if (-not (Get-Command $adb -ErrorAction SilentlyContinue)) { throw 'The configured ADB executable is unavailable.' }
 
 $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -26,7 +38,7 @@ foreach ($line in $devices) {
   if ($line -notmatch '^([^\s]+)\s+device\s*$') { continue }
   $transport = $Matches[1]
   $identity = & $adb -s $transport shell getprop ro.serialno
-  if ($LASTEXITCODE -eq 0 -and $identity.Trim() -ceq [string]$config.deviceSerial) { $transports += $transport }
+  if ($LASTEXITCODE -eq 0 -and $identity.Trim() -ceq $serial) { $transports += $transport }
 }
 if ($transports.Count -ne 1) { throw 'Connect exactly one authorized transport for the configured phone, then retry.' }
 
