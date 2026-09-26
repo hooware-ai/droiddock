@@ -86,7 +86,8 @@ export function encodeControl(input: unknown): Buffer[] {
   }
   if (m.type === "touch") {
     const action = integer(m.action, 0, 2); const b = Buffer.alloc(32);
-    b[0] = 2; b[1] = action; b.writeBigUInt64BE(0n, 2);
+    const pointerId = m.pointerId === undefined ? 0 : integer(m.pointerId, 0, 2);
+    b[0] = 2; b[1] = action; b.writeBigUInt64BE(BigInt(pointerId), 2);
     position(m, b, 10); b.writeUInt16BE(action === 1 ? 0 : 65535, 22);
     return [b];
   }

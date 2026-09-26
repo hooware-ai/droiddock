@@ -34,6 +34,8 @@ canvas:focus-visible{outline:2px solid #8eb4d4;outline-offset:-2px}
 .control-divider{height:1px;width:20px;background:var(--line);margin:4px 0}
 #fullscreen[aria-pressed=true] .fullscreen-enter{display:none}
 #fullscreen:not([aria-pressed=true]) .fullscreen-exit{display:none}
+.zoom-button{font-size:10px}
+.zoom-button[aria-pressed=true]{background:#e7edf3;color:var(--slate)}
 .more-controls{flex-shrink:0}
 summary{list-style:none}
 summary::-webkit-details-marker{display:none}

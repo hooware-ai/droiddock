@@ -91,6 +91,11 @@ test('touch uses pointer zero, 32-bit coordinates, 16-bit dimensions and pressur
   assert.equal(up[1], 1);
   assert.equal(up.readUInt16BE(22), 0);
   assert.equal(encodeControl({ ...base, action: 2 })[0][1], 2);
+  assert.equal(encodeControl({ ...base, action: 0, pointerId: 1 })[0].readBigUInt64BE(2), 1n);
+  assert.equal(encodeControl({ ...base, action: 2, pointerId: 2 })[0].readBigUInt64BE(2), 2n);
+  for (const pointerId of [-1, 3, 0.5, '1', null]) {
+    assert.throws(() => encodeControl({ ...base, action: 0, pointerId }), /coordinate or action/);
+  }
 });
 
 test('paste atomically sets Unicode clipboard then requests native Android paste', () => {
