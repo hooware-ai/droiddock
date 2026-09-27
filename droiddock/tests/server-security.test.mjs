@@ -171,6 +171,37 @@ test('rich paste requires current controller capability and releases the host st
   await assert.rejects(readFile(result.path));
 });
 
+test('file paste never forwards host system error text but keeps fixed session guidance', { timeout: 10000 }, async t => {
+  const bridge = await fixture(t, `
+    export class ScrcpySession {
+      calls = 0;
+      constructor(root, onEvent) { this.onEvent = onEvent; }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      async pasteFile() {
+        if (this.calls++ === 0) {
+          const path = ['C:', 'Users', 'SyntheticUser', 'AppData', 'Local', 'Temp', 'droiddock-paste-synthetic'].join('\\\\');
+          throw Object.assign(new Error("EACCES: permission denied, open '" + path + "'"), { code:'EACCES', errno:-13, syscall:'open', path });
+        }
+        throw new Error('Install the DroidDock paste helper before pasting files.');
+      }
+      async stop() {}
+    }
+  `);
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  const token = await until(() => bridge.messages.find(message => message.type === 'pasteCapability')?.value);
+  const headers = { origin: bridge.origin, 'x-droiddock': '1', 'x-paste-capability': token, 'content-type': 'image/png' };
+  const url = `${bridge.origin}/api/paste-file`;
+  const host = await fetch(url, { method:'POST', headers, body:Buffer.from([1]) });
+  const hostText = await host.text();
+  assert.equal(host.status, 409);
+  assert.deepEqual(JSON.parse(hostText), { error: 'The phone could not paste this file.' });
+  assert.doesNotMatch(hostText, /SyntheticUser|droiddock-paste-synthetic|EACCES|syscall/);
+  const helper = await fetch(url, { method:'POST', headers, body:Buffer.from([1]) });
+  assert.equal(helper.status, 409);
+  assert.deepEqual(await helper.json(), { error: 'Install the DroidDock paste helper before pasting files.' });
+});
+
 test('cleanup retry reserves paste ownership before concurrent HTTP requests', { timeout: 10000 }, async t => {
   const bridge = await fixture(t, `
     export class ScrcpySession {

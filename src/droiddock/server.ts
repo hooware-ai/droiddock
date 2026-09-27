@@ -204,6 +204,16 @@ async function connect(): Promise<void> {
   });
 }
 
+// Session and command errors carry fixed, sanitized text. Node system errors
+// can name host paths or syscalls, so their messages never reach the browser.
+function pasteFailure(error: unknown, cancelled: boolean): { status: number; error: string } {
+  if (error instanceof PasteFileError) return { status: error.status, error: error.message };
+  if (cancelled) return { status: 409, error: "File paste was cancelled." };
+  const system = error as NodeJS.ErrnoException | undefined;
+  const hostError = typeof system?.syscall === "string" || typeof system?.path === "string" || typeof system?.errno === "number";
+  return { status: 409, error: error instanceof Error && !hostError ? error.message : "The phone could not paste this file." };
+}
+
 export function allowedRequest(req: Pick<IncomingMessage, "headers">, expected: string): boolean {
   return req.headers.host === expected && (!req.headers.origin || req.headers.origin === `http://${expected}`);
 }
@@ -249,9 +259,9 @@ const http = createServer(async (req, res) => {
           ? "Paste may have reached the phone, but phone cleanup is pending. Do not resend it yet; reconnect to retry cleanup."
           : "Paste sent to the focused phone app. If nothing appears, use that app's Attach control." };
       } catch (error) {
-        responseCode = error instanceof PasteFileError ? error.status : 409;
-        response = { error: error instanceof PasteFileError ? error.message : controller.signal.aborted ? "File paste was cancelled." :
-          error instanceof Error ? error.message : "The phone could not paste this file." };
+        const failure = pasteFailure(error, controller.signal.aborted);
+        responseCode = failure.status;
+        response = { error: failure.error };
       } finally {
         clearTimeout(timeout);
         if (!(await hostPasteCleanup.retry())) {
