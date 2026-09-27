@@ -227,6 +227,51 @@ test('pinned vendor content cannot be replaced with arbitrary binary or license 
   assert.equal(check(cwd).findings.filter(item => item.rule === 'pinned-vendor-hash').length, 2);
 });
 
+test('another branch changing a pinned binary does not fail unrelated checks, but its text is still privacy-scanned', t => {
+  const cwd = repository(t);
+  commit(cwd);
+  const jar = 'android/paste-helper/gradle/wrapper/gradle-wrapper.jar';
+  git(cwd, ['checkout', '-q', '-b', 'dependency-update']);
+  stage(cwd, jar, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 1, 2, 3]));
+  commit(cwd);
+  git(cwd, ['checkout', '-q', 'main']);
+  assert.equal(check(cwd).ok, true, 'a pending pinned-file update on another branch is that branch\'s check');
+  git(cwd, ['checkout', '-q', 'dependency-update']);
+  assert.ok(rules(check(cwd)).includes('pinned-vendor-hash'), 'the branch itself still fails its own check');
+  git(cwd, ['checkout', '-q', '-b', 'text-replacement', 'main']);
+  stage(cwd, 'droiddock/vendor/scrcpy-4.1/LICENSE', ['ghp', '_', 'B'.repeat(36)].join(''));
+  commit(cwd);
+  git(cwd, ['checkout', '-q', 'main']);
+  const other = rules(check(cwd));
+  assert.ok(!other.includes('pinned-vendor-hash'));
+  assert.ok(other.includes('credential-pattern'), other.join(','));
+});
+
+test('a replaced pinned file in HEAD history still fails after it is removed from the index', t => {
+  const cwd = repository(t);
+  stage(cwd, 'droiddock/vendor/scrcpy-4.1/scrcpy-server', Buffer.from([0, 1, 2, 3]));
+  commit(cwd);
+  git(cwd, ['rm', '-q', '--', 'droiddock/vendor/scrcpy-4.1/scrcpy-server']);
+  commit(cwd);
+  assert.deepEqual(check(cwd).findings.filter(item => item.rule === 'pinned-vendor-hash').map(item => item.path), ['droiddock/vendor/scrcpy-4.1/scrcpy-server']);
+});
+
+test('an earlier reviewed pin is accepted in HEAD history but never in the index', t => {
+  const cwd = repository(t);
+  const path = 'android/paste-helper/gradle/wrapper/gradle-wrapper.jar';
+  const older = Buffer.from([0, 9, 8, 7]), newer = Buffer.from([0, 1, 2, 3]);
+  const pins = new Map([[path, sha256(newer)]]);
+  const earlierPins = new Map([[path, [sha256(older)]]]);
+  stage(cwd, path, older);
+  commit(cwd);
+  stage(cwd, path, newer);
+  commit(cwd);
+  assert.equal(check(cwd, { pins, earlierPins }).ok, true, 'an upgrade needs no history rewrite');
+  assert.ok(rules(check(cwd, { pins })).includes('pinned-vendor-hash'), 'unlisted old bytes in history still fail');
+  stage(cwd, path, older);
+  assert.ok(rules(check(cwd, { pins, earlierPins })).includes('pinned-vendor-hash'), 'the index must match the current pin');
+});
+
 test('shallow history is rejected', t => {
   const cwd = repository(t);
   commit(cwd);
