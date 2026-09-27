@@ -91,6 +91,30 @@ test('text-editing keys use fixed Android keycodes without broadening the allowl
   assert.throws(() => encodeControl({ type: 'key', key: 'KEYCODE_MOVE_HOME' }), /Unsupported key/);
 });
 
+test('Shift sets a fixed Android meta state only for navigation keys', () => {
+  const shifted = {
+    up: '0000000000130000000000000041', down: '0000000000140000000000000041',
+    left: '0000000000150000000000000041', right: '0000000000160000000000000041',
+    moveHome: '00000000007a0000000000000041', moveEnd: '00000000007b0000000000000041',
+    pageUp: '00000000005c0000000000000041', pageDown: '00000000005d0000000000000041',
+  };
+  for (const [key, down] of Object.entries(shifted)) {
+    const up = `0001${down.slice(4)}`;
+    assert.deepEqual(encodeControl({ type: 'key', key, shift: true }).map(packet => packet.toString('hex')), [down, up], key);
+    const plain = [down, up].map(hex => `${hex.slice(0, 20)}00000000`);
+    assert.deepEqual(encodeControl({ type: 'key', key, shift: false }).map(packet => packet.toString('hex')), plain, key);
+    assert.deepEqual(encodeControl({ type: 'key', key }).map(packet => packet.toString('hex')), plain, key);
+  }
+  for (const key of ['enter', 'backspace', 'forwardDelete', 'tab', 'back', 'home', 'paste', 'power']) {
+    assert.throws(() => encodeControl({ type: 'key', key, shift: true }), /Shift is only supported with navigation keys/, key);
+    assert.throws(() => encodeControl({ type: 'key', key, shift: false }), /Shift is only supported with navigation keys/, key);
+  }
+  for (const shift of [1, 'true', null, {}, [true]]) {
+    assert.throws(() => encodeControl({ type: 'key', key: 'left', shift }), /Shift is only supported with navigation keys/);
+  }
+  assert.throws(() => encodeControl({ type: 'key', key: 'KEYCODE_DPAD_LEFT', shift: true }), /Unsupported key/);
+});
+
 test('text prefixes UTF-8 byte count and enforces upstream 300-byte maximum', () => {
   assert.equal(encodeControl({ type: 'text', text: 'é🙂' })[0].toString('hex'), '0100000006c3a9f09f9982');
   assert.equal(encodeControl({ type: 'text', text: 'é'.repeat(150) })[0].length, 305);

@@ -41,6 +41,9 @@ export class VideoParser {
 }
 
 const KEYS: Record<string, number> = { home: 3, back: 4, recents: 187, volumeUp: 24, volumeDown: 25, power: 26, enter: 66, backspace: 67, forwardDelete: 112, tab: 61, up: 19, down: 20, left: 21, right: 22, pageUp: 92, pageDown: 93, moveHome: 122, moveEnd: 123, paste: 279 };
+// Shift may extend a text selection only with these keys. The server owns the meta state.
+const SELECTION_KEYS = new Set(["up", "down", "left", "right", "moveHome", "moveEnd", "pageUp", "pageDown"]);
+const META_SHIFT_LEFT = 0x41; // Android META_SHIFT_ON | META_SHIFT_LEFT_ON.
 function integer(value: unknown, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new Error("Invalid input coordinate or action.");
   return value;
@@ -67,8 +70,10 @@ export function encodeControl(input: unknown): Buffer[] {
   }
   if (m.type === "key") {
     if (typeof m.key !== "string" || !Object.hasOwn(KEYS, m.key)) throw new Error("Unsupported key.");
+    if (m.shift !== undefined && (typeof m.shift !== "boolean" || !SELECTION_KEYS.has(m.key))) throw new Error("Shift is only supported with navigation keys.");
+    const metaState = m.shift ? META_SHIFT_LEFT : 0;
     return [0, 1].map(action => {
-      const b = Buffer.alloc(14); b[1] = action; b.writeUInt32BE(KEYS[m.key as string]!, 2); return b;
+      const b = Buffer.alloc(14); b[1] = action; b.writeUInt32BE(KEYS[m.key as string]!, 2); b.writeUInt32BE(metaState, 10); return b;
     });
   }
   if (m.type === "text") {
