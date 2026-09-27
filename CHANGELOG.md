@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors. This document 
 
 ## Unreleased
 
+- File paste reports host staging failures (creating, writing, or closing the temporary file) with fixed guidance instead of raw filesystem messages, which could include the temporary path and local account name. A failed temporary-file removal no longer hides the original error, such as the 16 MiB limit.
 - Opt-in Map zoom mode maps mouse-wheel movement to a bounded two-finger pinch on the live phone screen. Ordinary scrolling remains available when the mode is off; disconnect and controller handoff clear the mode.
 - Optional Android helper for explicit direct image/file paste into focused apps that accept rich content. One item per gesture, 16 MiB limit, session-bound local transfer, with a Paste file picker when the browser does not expose copied files. Other apps still need their own attachment controls.
 - Opt-in automatic phone-unlock PIN panel, based on bounded read-only lock-state probes. Manual PIN entry remains available from the rail; detection cannot identify the authentication method or guarantee that the phone field is ready. PIN, Help, and Details panels close safely without sending Android Back.
