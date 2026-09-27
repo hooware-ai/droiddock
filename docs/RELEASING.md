@@ -57,6 +57,8 @@ Record which settings are configured and which have been verified. A written pol
 
 ## Build a reproducible source archive
 
+Before tagging, move the [CHANGELOG](../CHANGELOG.md) entries that the release contains from **Unreleased** to a new `## <version> - <date>` section. Check each cited pull request against `git log <previous-tag>..HEAD`; later changes stay under **Unreleased**. Commit that change as part of the release commit.
+
 From a clean, committed checkout:
 
 ```powershell
