@@ -77,6 +77,20 @@ test('key events match upstream big-endian down/up wire format', () => {
   assert.deepEqual(packets.map(b => b.toString('hex')), ['0000000000030000000000000000', '0001000000030000000000000000']);
 });
 
+test('text-editing keys use fixed Android keycodes without broadening the allowlist', () => {
+  const wire = {
+    moveHome: ['00000000007a0000000000000000', '00010000007a0000000000000000'],
+    moveEnd: ['00000000007b0000000000000000', '00010000007b0000000000000000'],
+    forwardDelete: ['0000000000700000000000000000', '0001000000700000000000000000'],
+    pageUp: ['00000000005c0000000000000000', '00010000005c0000000000000000'],
+    pageDown: ['00000000005d0000000000000000', '00010000005d0000000000000000'],
+  };
+  for (const [key, expected] of Object.entries(wire)) {
+    assert.deepEqual(encodeControl({ type: 'key', key }).map(packet => packet.toString('hex')), expected, key);
+  }
+  assert.throws(() => encodeControl({ type: 'key', key: 'KEYCODE_MOVE_HOME' }), /Unsupported key/);
+});
+
 test('text prefixes UTF-8 byte count and enforces upstream 300-byte maximum', () => {
   assert.equal(encodeControl({ type: 'text', text: 'é🙂' })[0].toString('hex'), '0100000006c3a9f09f9982');
   assert.equal(encodeControl({ type: 'text', text: 'é'.repeat(150) })[0].length, 305);
