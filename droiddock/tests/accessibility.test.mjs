@@ -77,7 +77,7 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser({ localStorage, focused = true, hidden = false, clock = false, fetchImpl } = {}) {
+function loadBrowser({ localStorage, focused = true, hidden = false, clock = false, fetchImpl, now, source = appSource } = {}) {
   const elements = new Map();
   const root = makeElement();
   const documentHandlers = {};
@@ -86,6 +86,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
   const requests = [];
   const timers = new Map();
   let nextTimerId = 0;
+  let lastTimerCallback = null;
   const keyButtons = ['back', 'home', 'recents', 'volumeDown', 'volumeUp', 'power'].map((key) => makeElement({ dataset: { key }, disabled: true }));
   const summary = makeElement();
   const more = makeElement({
@@ -143,7 +144,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
     emit(frame = { displayWidth: 720, displayHeight: 1280, close() {} }) { this.output(frame); }
   }
   class Observer { observe() {} }
-  runInNewContext(appSource, {
+  runInNewContext(source, {
     document: Object.assign(documentState, {
       documentElement: root,
       getElementById: element,
@@ -161,7 +162,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
     EncodedVideoChunk: class { constructor(init) { Object.assign(this, init); } },
     MutationObserver: Observer,
     ResizeObserver: Observer,
-    setTimeout(callback) { const id = ++nextTimerId; if (clock) timers.set(id, callback); return id; },
+    setTimeout(callback) { const id = ++nextTimerId; lastTimerCallback = callback; if (clock) timers.set(id, callback); return id; },
     clearTimeout(id) { timers.delete(id); },
     fetch: (url, options) => { requests.push(url); return fetchImpl ? fetchImpl(url, options) : new Promise(() => {}); },
     AbortController,
@@ -171,9 +172,11 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
     ArrayBuffer,
     Uint8Array,
     DataView,
+    performance: { now: now || (() => 0) },
   });
   return {
     element, root, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests,
+    lastTimerCallback: () => lastTimerCallback,
     runTimer() { const [id, callback] = [...timers.entries()].at(-1) || []; if (callback) { timers.delete(id); callback(); return true; } return false; },
   };
 }

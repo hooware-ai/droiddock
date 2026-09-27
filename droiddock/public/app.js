@@ -42,6 +42,11 @@
   let pairingAttempt = false;
   let pairingDiscoveryPending = false;
   let pairingReconnect = false;
+  let statsTimer = 0;
+  let statsEpoch = 0;
+  let statsStarted = 0;
+  let statsBytes = 0;
+  let statsFrames = 0;
   const available = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
   const themeOptions = ['system', 'light', 'dark'];
   const themePreferenceKey = 'droiddock.theme';
@@ -73,6 +78,54 @@
     node.textContent = text;
   }
 
+  function resetStreamStats() {
+    ++statsEpoch;
+    clearTimeout(statsTimer);
+    statsTimer = 0;
+    statsStarted = 0;
+    statsBytes = 0;
+    statsFrames = 0;
+    for (const id of ['stream-stats-bytes', 'stream-stats-frames', 'stream-stats-queue']) assignText($(id), '—');
+  }
+
+  function streamStatsActive() {
+    return $('stream-stats-toggle').checked && $('more-controls').open && !document.hidden && browserFocused &&
+      state === 'connected' && hasFrame && socket?.readyState === WebSocket.OPEN;
+  }
+
+  function syncStreamStats() {
+    if (!streamStatsActive()) {
+      if (statsTimer) resetStreamStats();
+      return;
+    }
+    if (statsTimer) return;
+    const epoch = ++statsEpoch;
+    const streamGeneration = generation;
+    const streamSocket = socket;
+    statsStarted = performance.now();
+    statsBytes = 0;
+    statsFrames = 0;
+    for (const id of ['stream-stats-bytes', 'stream-stats-frames', 'stream-stats-queue']) assignText($(id), 'Collecting…');
+    function sample() {
+      if (epoch !== statsEpoch) return;
+      statsTimer = 0;
+      if (streamGeneration !== generation || streamSocket !== socket || !streamStatsActive()) {
+        resetStreamStats();
+        return;
+      }
+      const now = performance.now();
+      const elapsed = Math.max(1, now - statsStarted);
+      assignText($('stream-stats-bytes'), `${Math.round(statsBytes * 1000 / elapsed)} B/s`);
+      assignText($('stream-stats-frames'), `${(statsFrames * 1000 / elapsed).toFixed(1)} drawn/s`);
+      assignText($('stream-stats-queue'), String(decoder?.decodeQueueSize ?? '—'));
+      statsStarted = now;
+      statsBytes = 0;
+      statsFrames = 0;
+      statsTimer = setTimeout(sample, 1000);
+    }
+    statsTimer = setTimeout(sample, 1000);
+  }
+
   function setState(next, message = '') {
     if (next !== 'connected') clearZoomShortcut();
     if (next !== 'connected' && state === 'connected') cancelZoom();
@@ -96,6 +149,7 @@
     // Empty-state copy is the connecting live region. Avoid a second announcement from the details panel.
     $('message').setAttribute('aria-live', hasFrame ? 'polite' : 'off');
     updateControls();
+    syncStreamStats();
     if (next !== 'connected') closePin(false);
     if (next !== 'error') closePair();
     else updatePairingControls();
@@ -358,6 +412,7 @@
   }
 
   function clearScreen() {
+    resetStreamStats();
     cancelZoom();
     releasePointer();
     resetDecoder();
@@ -579,6 +634,7 @@
     let data = new Uint8Array(buffer, 12);
     if (config) {
       if (size > 1024 * 1024) throw new Error('Invalid video configuration size.');
+      resetStreamStats();
       resetDecoder();
       codecBytes = data.slice();
       decoderConfiguration = { codec: codecFromAnnexB(data), optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' };
@@ -589,6 +645,7 @@
             const changed = canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight;
             if (changed) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
             context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+            if (statsTimer) statsFrames++;
             const firstFrame = !hasFrame;
             if (firstFrame || changed) {
               hasFrame = true;
@@ -611,8 +668,10 @@
       });
       decoder = activeDecoder;
       decoder.configure(decoderConfiguration);
+      syncStreamStats();
       return;
     }
+    if (statsTimer) statsBytes += size;
     if (!decoder || !codecBytes) return;
     if (decoder.decodeQueueSize > 8) {
       // Dropping interdependent frames can freeze the display until another IDR.
@@ -833,6 +892,7 @@
     const panel = $('more-controls');
     if (!panel.open) return false;
     panel.open = false;
+    syncStreamStats();
     clearPin();
     panel.querySelector('summary').focus();
     return true;
@@ -959,7 +1019,9 @@
       closePin(true);
       $('help-controls').open = false;
     }
+    syncStreamStats();
   });
+  $('stream-stats-toggle').addEventListener('change', syncStreamStats);
   $('help-controls').addEventListener('toggle', () => {
     if ($('help-controls').open) {
       closePin(true);
@@ -970,9 +1032,9 @@
     event.preventDefault();
     closeHelpControls();
   });
-  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); syncLockSubscription(); });
+  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); syncLockSubscription(); syncStreamStats(); });
   $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
-  window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); });
+  window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); syncStreamStats(); });
   window.addEventListener('pagehide', () => { closePin(false); closePair(); disconnect(); });
   $('connect').addEventListener('click', () => {
     if (socket?.readyState === WebSocket.OPEN && state === 'error') {
@@ -1031,6 +1093,7 @@
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { clearZoomShortcut(); cancelZoom(); releasePointer(); closePin(false); closePair(); }
     syncLockSubscription();
+    syncStreamStats();
   });
   fetch('/api/status').then((response) => {
     if (!response.ok) throw new Error();
