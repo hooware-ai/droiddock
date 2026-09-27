@@ -806,7 +806,7 @@
     }
     send({ type: 'scroll', ...coordinates(event), dx: Math.max(-1, Math.min(1, -event.deltaX * unit / 100)), dy: Math.max(-1, Math.min(1, -event.deltaY * unit / 100)) });
   }, { passive: false });
-  const keyboardKeys = { Escape: 'back', Home: 'home', Enter: 'enter', Backspace: 'backspace', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  const keyboardKeys = { Escape: 'back', Home: 'moveHome', End: 'moveEnd', Delete: 'forwardDelete', PageUp: 'pageUp', PageDown: 'pageDown', Enter: 'enter', Backspace: 'backspace', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
   const maxPasteFileBytes = 16 * 1024 * 1024;
   function cancelFilePaste() {
     filePasteController?.abort();
