@@ -16,7 +16,7 @@ made that Hooware authored scrcpy or its dependencies.
 | ws | Local WebSocket transport | MIT |
 | TypeScript | Development compiler | Apache-2.0 |
 | @types/node, @types/ws, undici-types | Development type definitions | MIT |
-| Gradle 9.6.1 wrapper | Optional Android helper build launcher | Apache-2.0 |
+| Gradle 9.8.0 wrapper | Optional Android helper build launcher | Apache-2.0 |
 | Android Gradle Plugin 9.3.2 | Optional Android helper build plugin | Apache-2.0 |
 
 The exact npm versions, registry URLs, and integrity hashes are in

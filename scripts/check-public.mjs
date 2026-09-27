@@ -9,11 +9,14 @@ const vendor = 'droiddock/vendor/scrcpy-4.1/';
 const pinned = new Map([
   [vendor + 'scrcpy-server', 'deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae'],
   [vendor + 'LICENSE', '01c12035bf35af37241298dc7ad538eb2a07e5c940437bc6876feeaa9d1951d0'],
-  ['android/paste-helper/gradle/wrapper/gradle-wrapper.jar', '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7'],
+  ['android/paste-helper/gradle/wrapper/gradle-wrapper.jar', '238e777fcddd7e34f9708186085def2abd6e08e658505b38718d79d74c21abd5'],
 ]);
 // Earlier reviewed pins, accepted only in commits reachable from HEAD. When upgrading a
 // pinned file, move its old hash here in the same reviewed change; history is never rewritten.
-const previousPins = new Map();
+const previousPins = new Map([
+  // Gradle 9.6.1 wrapper JAR, replaced by the 9.8.0 wrapper.
+  ['android/paste-helper/gradle/wrapper/gradle-wrapper.jar', ['497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7']],
+]);
 const rootFiles = new Set(['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'config.example.json']);
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
 
