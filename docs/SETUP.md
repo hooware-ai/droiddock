@@ -60,7 +60,7 @@ When a DroidDock connection fails, its status may report a `candidate` pairing s
 
 ## Optional direct image and file paste
 
-Direct paste into a compatible focused Android app requires a small, optional DroidDock Android helper. Install it on the **configured phone** after normal setup. You need JDK 17 or newer and Android SDK platform 36 for the one-time build; the checked-in Gradle wrapper pins the build tool and verifies its download checksum. The helper is a debuggable local build because the bridge copies each explicitly pasted file into its private storage with Android's `run-as` command. It has no launcher screen and does not run a background service.
+Direct paste into a compatible focused Android app requires a small, optional DroidDock Android helper. Install it on the **configured phone** after normal setup. You need JDK 17 or newer and Android SDK platform 36 for the one-time build; the checked-in Gradle wrapper pins the build tool and verifies its download checksum, and [dependency verification](#helper-build-dependency-checksums) checks every build artifact it downloads. The helper is a debuggable local build because the bridge copies each explicitly pasted file into its private storage with Android's `run-as` command. It has no launcher screen and does not run a background service.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Install-PasteHelper.ps1
@@ -69,6 +69,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Install-PasteHel
 The script uses the same `DROIDDOCK_DEVICE_SERIAL` and `DROIDDOCK_ADB` environment overrides as the running app, then verifies that permanent phone identity before installation. Reinstall the helper after changing phones. In DroidDock, focus the phone screen and press Ctrl+V with one copied image/file, or choose **Paste file** in Details. The browser sends only that selected item, up to 16 MiB, to the local bridge. The bridge stages it temporarily, verifies the session's phone identity, copies it to helper-private storage, sets an Android content-URI clipboard item, and requests Android Paste in the currently focused app. A failed device-side cleanup remains pending in the running service and is retried on the verified phone before reconnecting. The browser reports when the paste gesture was sent, not whether the target app accepted it. If nothing appears, use that app's own attachment control. Ordinary text paste does not need this helper.
 
 Android apps must implement rich-content receiving for a direct image/file paste to work. No manufacturer-specific branch is used, but other phones and target apps remain unverified. An explicitly pasted item replaces the phone clipboard; the helper retains up to four recent items and removes older items on a later paste. Uninstalling the helper removes its private files. No automatic clipboard watching or synchronization is enabled.
+
+### Helper build dependency checksums
+
+`android/paste-helper/gradle/verification-metadata.xml` pins a SHA-256 checksum for every artifact the helper build downloads: the Android Gradle Plugin, its build dependencies, and the host-specific `aapt2` tool for Windows, Linux, and macOS. `Install-PasteHelper.ps1` and CI build with `--dependency-verification strict`, so a missing or different checksum stops the build before anything is installed. Treat a verification failure as a possibly altered download: do not bypass it or install the result.
+
+Signatures are not verified. Most Google Maven artifacts that make up the plugin publish no PGP signatures, so signature checks would cover only a small subset and add a trusted-key list to maintain. Like the Gradle distribution pin, the checksums are recorded on first download over HTTPS, and every change to them is visible in review.
+
+Maintainers regenerate the file only for a deliberate plugin or build change, such as a Dependabot `gradle` pull request, which fails CI until then. From `android/paste-helper`, use a fresh Gradle user home so every artifact is downloaded again:
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'droiddock-gradle-verify'
+.\gradlew.bat --write-verification-metadata sha256 assembleDebug --rerun-tasks --no-daemon
+```
+
+`--rerun-tasks` makes the build resolve the task-time `aapt2` artifact. A Windows run records only the Windows `aapt2` jar; add the Linux and macOS jars for the same version from Google Maven, checking each download against Google's published `.sha1` file. Review the diff: every changed or added coordinate should follow from the intended upgrade. Then confirm that a clean strict build passes on Windows and in the CI `android-paste-helper` job.
 
 ## Configuration and launch
 

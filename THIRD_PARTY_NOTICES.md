@@ -28,8 +28,10 @@ the source archive. Gitleaks uses the MIT License.
 The optional Android helper includes the standard Gradle wrapper scripts and JAR.
 Its JAR SHA-256 is pinned in `scripts/check-public.mjs`; its Gradle distribution
 URL and SHA-256 are pinned in `android/paste-helper/gradle/wrapper/gradle-wrapper.properties`.
-The Android Gradle Plugin is fetched only when building the helper. Gradle and
-the plugin are independently maintained and licensed under Apache-2.0.
+The Android Gradle Plugin and its build dependencies are fetched only when
+building the helper; `android/paste-helper/gradle/verification-metadata.xml`
+records their coordinates and SHA-256 checksums, not their code. Gradle and the
+plugin are independently maintained and licensed under Apache-2.0.
 
 Android platform tools, Node.js, PowerShell, browsers, and Codex are separately
 installed products subject to their own terms. Hooware is not affiliated with

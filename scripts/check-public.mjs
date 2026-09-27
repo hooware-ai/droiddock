@@ -43,7 +43,7 @@ function allowedPath(path) {
   if (rootFiles.has(path) || pinned.has(path) || path === vendor + 'upstream.json') return true;
   if (/(?:^|\/)(?:node_modules|dist|artifacts|logs|screenshots|\.setup|\.vscode|\.idea|\.env[^/]*)(?:\/|$)/i.test(path)) return false;
   if (/(?:^|\/)(?:config\.local|credentials?|secrets?|id_rsa|id_ed25519)(?:[./]|$)|\.(?:log|pem|key|pfx|p12|png|jpe?g|webp|gif|zip|map)$/i.test(path)) return false;
-  return /^(?:src\/.*\.ts|scripts\/[^/]+\.(?:mjs|ps1)|droiddock\/tests\/[^/]+\.test\.mjs|droiddock\/public\/[^/]+\.(?:html|css|js)|docs\/.*\.md|android\/paste-helper\/(?:gradlew(?:\.bat)?|(?:build|settings)\.gradle\.kts|gradle\/wrapper\/gradle-wrapper\.properties|(?:src|test-target\/src)\/main\/(?:AndroidManifest\.xml|java\/ai\/hooware\/droiddock\/(?:paste|pastetest)\/[A-Za-z]+\.java)|test-target\/build\.gradle\.kts)|\.github\/(?:workflows\/[^/]+\.ya?ml|ISSUE_TEMPLATE\/[^/]+\.(?:md|ya?ml)|(?:PULL_REQUEST_TEMPLATE|pull_request_template)\.md|(?:FUNDING|dependabot)\.yml))$/.test(path);
+  return /^(?:src\/.*\.ts|scripts\/[^/]+\.(?:mjs|ps1)|droiddock\/tests\/[^/]+\.test\.mjs|droiddock\/public\/[^/]+\.(?:html|css|js)|docs\/.*\.md|android\/paste-helper\/(?:gradlew(?:\.bat)?|(?:build|settings)\.gradle\.kts|gradle\/wrapper\/gradle-wrapper\.properties|gradle\/verification-metadata\.xml|(?:src|test-target\/src)\/main\/(?:AndroidManifest\.xml|java\/ai\/hooware\/droiddock\/(?:paste|pastetest)\/[A-Za-z]+\.java)|test-target\/build\.gradle\.kts)|\.github\/(?:workflows\/[^/]+\.ya?ml|ISSUE_TEMPLATE\/[^/]+\.(?:md|ya?ml)|(?:PULL_REQUEST_TEMPLATE|pull_request_template)\.md|(?:FUNDING|dependabot)\.yml))$/.test(path);
 }
 
 function textRules(text, deny, { attribution = false } = {}) {
