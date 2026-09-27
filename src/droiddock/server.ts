@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { ScrcpySession, type RecoveryHint } from "./session.js";
@@ -9,11 +8,16 @@ import { SCRCPY_VERSION } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
 import { HostPasteCleanup, pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
+import { buildIdentity, readPublicAssets } from "./build-id.js";
 import { checkPairingEndpoint, pairConfiguredPhone, parsePairingRequest, type PairingRequest, type PairingResult } from "./pairing.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const installationId = createHash("sha256").update(resolve(root).toLowerCase()).digest("hex").slice(0, 16);
 const configurationId = createHash("sha256").update(JSON.stringify([config.deviceSerial, config.adb, config.deviceName, config.port])).digest("hex").slice(0, 16);
+// Serve the browser client this process started with, so an updated checkout never
+// pairs a newer client with older server code. Helpers compare buildId to detect that.
+const publicAssets = readPublicAssets(root);
+const buildId = buildIdentity(root, publicAssets);
 // Both src/droiddock and dist/droiddock are two directories below the root.
 const port = config.port;
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("DROIDDOCK_PORT must be an integer from 1024 to 65535.");
@@ -58,7 +62,7 @@ function recoveryFrom(error: unknown): RecoveryHint {
       (error.recovery === "candidate" || error.recovery === "unknown")) return error.recovery;
   return "unknown";
 }
-function status() { return { app: "DroidDock", type: "status", state, message, recovery, device: config.deviceName, version: SCRCPY_VERSION, packets: packetCount, installationId, configurationId, handoff: true }; }
+function status() { return { app: "DroidDock", type: "status", state, message, recovery, device: config.deviceName, version: SCRCPY_VERSION, packets: packetCount, installationId, configurationId, buildId, handoff: true }; }
 function send(value: unknown) { if (client?.readyState === WebSocket.OPEN) client.send(JSON.stringify(value)); }
 type PairingOutcome = PairingResult | "busy" | "cancelled" | "paired-unverified" | "identity-verified";
 function sendPairing(owner: WebSocket, result: PairingOutcome) {
@@ -297,8 +301,7 @@ const http = createServer(async (req, res) => {
     }
     const asset = assets[req.url ?? ""];
     if (req.method !== "GET" || !asset) { reply(res, 404, { error: "Not found." }); return; }
-    const content = await readFile(join(root, "droiddock/public", asset[0]));
-    res.writeHead(200, { "Content-Type": asset[1] }); res.end(content);
+    res.writeHead(200, { "Content-Type": asset[1] }); res.end(publicAssets.get(asset[0]));
   } catch { reply(res, 500, { error: "DroidDock could not complete this request." }); }
 });
 http.requestTimeout = 10000;

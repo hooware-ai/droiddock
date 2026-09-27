@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { phoneAction } from '../../scripts/phone.mjs';
 
-function fixture(kind = 'ours', state = 'connected') {
-  let service = { kind, status: { configurationId: 'expected', state, device: 'Test phone', message: 'Ready' } };
+function fixture(kind = 'ours', state = 'connected', buildId = 'current-build') {
+  let service = { kind, status: { configurationId: 'expected', buildId, state, device: 'Test phone', message: 'Ready' } };
   const calls = [];
   return { calls, set: value => { service = value; }, options: {
-    port: 3210, configurationId: 'expected', inspect: async () => service,
-    launch: async () => { calls.push('launch'); service = { kind: 'ours', status: { configurationId: 'expected', state: 'idle' } }; },
+    port: 3210, configurationId: 'expected', buildId: 'current-build', restartGuidance: 'SYNTHETIC RESTART NEEDED', inspect: async () => service,
+    launch: async () => { calls.push('launch'); service = { kind: 'ours', status: { configurationId: 'expected', buildId: 'current-build', state: 'idle' } }; },
     request: async (url, options) => { calls.push({ url, options }); service.status.state = 'idle'; return { ok: true }; },
   } };
 }
@@ -51,4 +51,32 @@ test('invalid actions and ports fail before any service access', async () => {
   const options = { port: 3210, inspect: () => assert.fail('must not access service') };
   await assert.rejects(phoneAction('shell', options), /Choose/);
   await assert.rejects(phoneAction('open', { ...options, port: 0 }), /Invalid/);
+});
+test('open refuses a service from a different build without launching, stopping, or disconnecting it', async () => {
+  // null models a service started before build identifiers existed.
+  for (const build of ['older-build', null]) {
+    const f = fixture('ours', 'connected', build);
+    await assert.rejects(phoneAction('open', f.options), /SYNTHETIC RESTART NEEDED/);
+    assert.deepEqual(f.calls, []);
+  }
+  const launched = fixture('free');
+  launched.options.launch = async () => { launched.calls.push('launch'); launched.set({ kind: 'ours', status: { configurationId: 'expected', buildId: 'older-build', state: 'idle' } }); };
+  await assert.rejects(phoneAction('open', launched.options), /SYNTHETIC RESTART NEEDED/);
+  assert.deepEqual(launched.calls, ['launch']);
+});
+test('status and disconnect still settle a stale-build session and flag the restart', async () => {
+  const f = fixture('ours', 'connected', 'older-build');
+  const status = await phoneAction('status', f.options);
+  assert.equal(status.state, 'connected');
+  assert.equal(status.restartNeeded, true);
+  assert.equal(status.next, 'SYNTHETIC RESTART NEEDED');
+  assert.deepEqual(f.calls, []);
+  const disconnected = await phoneAction('disconnect', f.options);
+  assert.equal(disconnected.state, 'idle');
+  assert.equal(disconnected.restartNeeded, true);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].url, 'http://127.0.0.1:3210/api/disconnect');
+  const current = await phoneAction('status', fixture().options);
+  assert.equal(current.restartNeeded, undefined);
+  assert.equal(current.next, undefined);
 });
