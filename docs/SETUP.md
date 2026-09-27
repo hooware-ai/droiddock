@@ -74,12 +74,12 @@ Android apps must implement rich-content receiving for a direct image/file paste
 
 `android/paste-helper/gradle/verification-metadata.xml` pins a SHA-256 checksum for every artifact the helper build downloads: the Android Gradle Plugin, its build dependencies, and the host-specific `aapt2` tool for Windows, Linux, and macOS. `Install-PasteHelper.ps1` and CI build with `--dependency-verification strict`, so a missing or different checksum stops the build before anything is installed. Treat a verification failure as a possibly altered download: do not bypass it or install the result.
 
-Signatures are not verified. Most Google Maven artifacts that make up the plugin publish no PGP signatures, so signature checks would cover only a small subset and add a trusted-key list to maintain. Like the Gradle distribution pin, the checksums are recorded on first download over HTTPS, and every change to them is visible in review.
+Signatures are not verified. Most Google Maven artifacts that make up the plugin publish no PGP signatures, so signature checks would cover only a small subset and add a trusted-key list to maintain. Like the Gradle distribution pin, the checksums are recorded on first download over HTTPS, and every change to them is visible in review. On 2026-09-27, all 35 entries under `com.android.tools.build` and `com.android.application` were independently compared with their official Google Maven `.sha256` sidecars; every value matched, including the plugin JAR and the Windows, Linux, and macOS `aapt2` JARs. The sidecar URL follows `https://dl.google.com/dl/android/maven2/<group-as-path>/<name>/<version>/<artifact>.sha256`. The other entries have not all been independently compared with publisher checksums.
 
 Maintainers regenerate the file only for a deliberate plugin or build change, such as a Dependabot `gradle` pull request, which fails CI until then. From `android/paste-helper`, use a fresh Gradle user home so every artifact is downloaded again:
 
 ```powershell
-$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'droiddock-gradle-verify'
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP ('droiddock-gradle-verify-' + [guid]::NewGuid().ToString('N'))
 .\gradlew.bat --write-verification-metadata sha256 assembleDebug --rerun-tasks --no-daemon
 ```
 
