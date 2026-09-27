@@ -25,7 +25,7 @@ async function checkout(t) {
   // Only this fixture's service may be stopped; a reused port can belong to another test.
   const ours = async () => { try { return origin && (await status()).installationId === installationId; } catch { return false; } };
   // Tests run in parallel, so another test can take a released port before the launcher binds it.
-  const start = async () => {
+  const start = async (attemptLaunch = launch) => {
     let result;
     for (let attempt = 0; attempt < 3; attempt++) {
       const reservation = createServer();
@@ -33,8 +33,11 @@ async function checkout(t) {
       port = reservation.address().port;
       await new Promise(done => reservation.close(done));
       origin = `http://127.0.0.1:${port}`;
-      result = launch();
+      result = attemptLaunch();
       if (result.status === 0 && await ours()) break;
+      // A readiness timeout can leave a detached child starting in the background.
+      // Only a confirmed pre-launch port collision is safe to retry.
+      if (result.status !== 1 || !result.stderr?.includes('Port occupied by another service or checkout.')) break;
     }
     return result;
   };
@@ -47,6 +50,20 @@ async function checkout(t) {
   });
   return { root, start, launch, status, get origin() { return origin; } };
 }
+
+test('the build-id fixture retries only a confirmed pre-launch port collision', async t => {
+  const fixture = await checkout(t);
+  for (const [failure, expectedAttempts] of [
+    [{ status: 1, stderr: 'Port occupied by another service or checkout.' }, 3],
+    [{ status: 1, stderr: 'DroidDock did not become ready.' }, 1],
+    [{ status: null, stderr: '' }, 1],
+  ]) {
+    let attempts = 0;
+    const result = await fixture.start(() => { attempts++; return failure; });
+    assert.equal(result, failure);
+    assert.equal(attempts, expectedAttempts);
+  }
+});
 
 test('build identity covers compiled server code and served assets only', async t => {
   const { root } = await checkout(t);
