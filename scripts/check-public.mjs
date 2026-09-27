@@ -11,6 +11,9 @@ const pinned = new Map([
   [vendor + 'LICENSE', '01c12035bf35af37241298dc7ad538eb2a07e5c940437bc6876feeaa9d1951d0'],
   ['android/paste-helper/gradle/wrapper/gradle-wrapper.jar', '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7'],
 ]);
+// Earlier reviewed pins, accepted only in commits reachable from HEAD. When upgrading a
+// pinned file, move its old hash here in the same reviewed change; history is never rewritten.
+const previousPins = new Map();
 const rootFiles = new Set(['.gitattributes', '.gitignore', 'AGENTS.md', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', 'package.json', 'package-lock.json', 'tsconfig.json', 'config.example.json']);
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
 
@@ -73,14 +76,15 @@ export function entries(cwd, revision) {
   });
 }
 
-export function checkPublic({ cwd = process.cwd(), initialRelease = false, canonicalRemotes = false, env = process.env } = {}) {
+export function checkPublic({ cwd = process.cwd(), initialRelease = false, canonicalRemotes = false, env = process.env, pins = pinned, earlierPins = previousPins } = {}) {
   cwd = resolve(cwd);
   const deny = privatePatterns(cwd, env);
   const findings = [];
   const add = (path, rule) => findings.push({ path, rule });
   const checked = new Set();
   if (git(cwd, ['rev-parse', '--is-shallow-repository']).toString('utf8').trim() !== 'false') add('[history]', 'full-history-required');
-  function scan(entry) {
+  // scope: 'index' (content being checked in), 'head' (HEAD's history), or 'other' (other refs only).
+  function scan(entry, scope) {
     const { path, oid, mode, stage } = entry;
     // Do not echo a denied identity embedded in a filename.
     const pathRules = textRules(path, deny);
@@ -89,13 +93,18 @@ export function checkPublic({ cwd = process.cwd(), initialRelease = false, canon
     if (!allowedPath(path)) add(label, 'release-path-not-allowed');
     if (stage !== '0') add(label, 'unmerged-index-entry');
     if (!['100644', '100755'].includes(mode)) { add(label, 'non-regular-file'); return; }
-    const key = path + ':' + oid;
+    // Pinned files are judged per scope; every other rule is scope-independent.
+    const key = (pins.has(path) ? scope + ':' : '') + path + ':' + oid;
     if (checked.has(key)) return;
     checked.add(key);
     const data = git(cwd, ['cat-file', 'blob', oid]);
-    if (pinned.has(path)) {
-      if (sha256(data) !== pinned.get(path)) add(label, 'pinned-vendor-hash');
-      return;
+    if (pins.has(path)) {
+      const hash = sha256(data);
+      if (hash === pins.get(path) || (scope === 'head' && earlierPins.get(path)?.includes(hash))) return;
+      if (scope !== 'other') { add(label, 'pinned-vendor-hash'); return; }
+      // Another branch's pinned-file change is enforced by that branch's own checks, so it
+      // must not fail unrelated pull requests. Text there is still privacy-scanned below.
+      if (data.includes(0)) return;
     }
     if (data.includes(0)) { add(label, 'unexpected-binary'); return; }
     const text = data.toString('utf8');
@@ -104,13 +113,14 @@ export function checkPublic({ cwd = process.cwd(), initialRelease = false, canon
   }
   const index = entries(cwd);
   if (!index.length) add('[index]', 'empty-index');
-  index.forEach(scan);
+  index.forEach(entry => scan(entry, 'index'));
   const revisions = git(cwd, ['rev-list', '--all']).toString('utf8').trim().split('\n').filter(Boolean);
   const head = git(cwd, ['rev-parse', '--verify', 'HEAD'], { optional: true })?.toString('utf8').trim();
   if (head && !revisions.includes(head)) revisions.push(head);
+  const headHistory = new Set(head ? git(cwd, ['rev-list', head]).toString('utf8').trim().split('\n').filter(Boolean) : []);
   if (initialRelease && (revisions.length !== 1 || !head)) add('[history]', 'initial-release-requires-single-commit');
   for (const revision of revisions) {
-    entries(cwd, revision).forEach(scan);
+    entries(cwd, revision).forEach(entry => scan(entry, headHistory.has(revision) ? 'head' : 'other'));
     const metadata = git(cwd, ['show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', revision]).toString('utf8');
     for (const rule of textRules(metadata, deny, { attribution: true })) add('[history]', rule);
     if (initialRelease) {
