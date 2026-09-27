@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { appendFile, copyFile, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { buildIdentity, PUBLIC_ASSETS } from '../../dist/droiddock/build-id.js';
 
 // A copied checkout under .setup resolves ws from the repository's node_modules.
@@ -16,20 +17,35 @@ async function checkout(t) {
   await cp('droiddock/public', join(root, 'droiddock/public'), { recursive: true });
   await mkdir(join(root, 'scripts'));
   for (const name of ['launch.mjs', 'setup.mjs', 'install-tests.mjs']) await copyFile(join('scripts', name), join(root, 'scripts', name));
-  const reservation = createServer();
-  reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
-  const port = reservation.address().port;
-  await new Promise(done => reservation.close(done));
-  const origin = `http://127.0.0.1:${port}`;
+  const installationId = createHash('sha256').update(resolve(root).toLowerCase()).digest('hex').slice(0, 16);
+  let port, origin;
   const launch = () => spawnSync(process.execPath, [join(root, 'scripts/launch.mjs')], { cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true,
     env: { ...process.env, DROIDDOCK_PORT: String(port), DROIDDOCK_DEVICE_SERIAL: 'TESTONLY', LOCALAPPDATA: join(root, '.logs') } });
   const status = async () => (await fetch(`${origin}/api/status`)).json();
+  // Only this fixture's service may be stopped; a reused port can belong to another test.
+  const ours = async () => { try { return origin && (await status()).installationId === installationId; } catch { return false; } };
+  // Tests run in parallel, so another test can take a released port before the launcher binds it.
+  const start = async () => {
+    let result;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const reservation = createServer();
+      reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
+      port = reservation.address().port;
+      await new Promise(done => reservation.close(done));
+      origin = `http://127.0.0.1:${port}`;
+      result = launch();
+      if (result.status === 0 && await ours()) break;
+    }
+    return result;
+  };
   t.after(async () => {
-    try { await fetch(`${origin}/api/shutdown`, { method: 'POST', headers: { 'X-DroidDock': '1' } }); } catch {}
-    for (let attempt = 0; attempt < 40; attempt++) { try { await fetch(`${origin}/api/status`); } catch { break; } await new Promise(done => setTimeout(done, 100)); }
+    if (await ours()) {
+      try { await fetch(`${origin}/api/shutdown`, { method: 'POST', headers: { 'X-DroidDock': '1' } }); } catch {}
+      for (let attempt = 0; attempt < 40 && await ours(); attempt++) await new Promise(done => setTimeout(done, 100));
+    }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
-  return { root, origin, launch, status };
+  return { root, start, launch, status, get origin() { return origin; } };
 }
 
 test('build identity covers compiled server code and served assets only', async t => {
@@ -48,10 +64,12 @@ test('build identity covers compiled server code and served assets only', async 
 });
 
 test('a running service keeps serving its startup assets and launch refuses to reuse a stale build', { timeout: 20000 }, async t => {
-  const { root, origin, launch, status } = await checkout(t);
+  const fixture = await checkout(t);
+  const { root, launch, status } = fixture;
   const original = new Map();
   for (const name of PUBLIC_ASSETS) original.set(name, await readFile(join(root, 'droiddock/public', name)));
-  const started = launch();
+  const started = await fixture.start();
+  const origin = fixture.origin;
   assert.equal(started.status, 0, started.stderr);
   const initial = await status();
   assert.equal(initial.buildId, buildIdentity(root));
