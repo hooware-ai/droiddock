@@ -124,6 +124,8 @@ A running service keeps the server code and browser page it started with, even a
 2. Update the checkout, for example with `git pull --ff-only`.
 3. Rerun `scripts/Install-DroidDock.ps1`. It installs dependencies, rebuilds, stops this installation's idle service, and relaunches it. With an active session it reports that and changes nothing.
 
+The installer never reports an active session as updated: even a matching compiled `buildId` cannot prove that newly pulled source has been rebuilt. Finish the session and rerun the installer.
+
 For a foreground service, stop `npm run droiddock` with Ctrl+C, then run `npm ci --ignore-scripts`, `npm run build`, and `npm run droiddock` again.
 
 `/api/status` includes a `buildId`: a non-secret hash of the compiled server and the served browser files, like the installation and configuration identifiers. The launcher, `scripts/phone.mjs`, and `Test-DroidDock.mjs --live` compare it with the checkout. On a mismatch they report **Restart needed** and leave the running service and its session unchanged. Opening the phone view is refused; status and disconnect still work and include `restartNeeded: true`, so the session can be settled first. A service started before build identifiers existed is treated as a mismatch.

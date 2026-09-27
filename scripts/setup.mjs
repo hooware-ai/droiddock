@@ -120,7 +120,16 @@ export async function setup(options) {
   const service = await inspectPort(port);
   if (service.kind === 'ours' && service.status.state !== 'idle') {
     const wantedId = createHash('sha256').update(JSON.stringify([requested ?? '', adb, process.env.DROIDDOCK_DEVICE_NAME ?? local.deviceName ?? 'Android phone', port])).digest('hex').slice(0, 16);
-    if (service.status.state === 'connected' && service.status.configurationId === wantedId) return { status: 'ready', stage: 'already_running', url: `http://127.0.0.1:${port}/`, next: 'Verify existing visible phone video and run diagnostics. The active session and files were left unchanged.' };
+    if (service.status.state === 'connected' && service.status.configurationId === wantedId) {
+      let builtId;
+      try {
+        const { buildIdentity } = await import('../dist/droiddock/build-id.js');
+        builtId = buildIdentity(root);
+      } catch { /* A missing or incomplete build cannot prove the running service is current. */ }
+      if (service.status.buildId !== builtId || !builtId) return { status: 'needs_action', stage: 'restart_needed', message: 'Restart needed. Finish the active phone session before updating; the existing service was left untouched.', url: `http://127.0.0.1:${port}/` };
+      // Even matching built files may be older than source changes not compiled yet.
+      return { status: 'needs_action', stage: 'active_session', message: 'Finish the active phone session before updating; the existing service was left untouched.', url: `http://127.0.0.1:${port}/` };
+    }
     return { status: 'needs_action', stage: 'active_session', message: 'This installation has an active or unsettled session. Finish it before updating; the existing service was left untouched.', url: `http://127.0.0.1:${port}` };
   }
   if (service.kind === 'ours') {

@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chooseDevice, parseArgs, inspectPort, runInstallTests, INSTALL_TEST_TIMEOUT } from '../../scripts/setup.mjs';
+import { chooseDevice, parseArgs, inspectPort, runInstallTests, INSTALL_TEST_TIMEOUT, setup, installationId, root } from '../../scripts/setup.mjs';
 import { installTestFiles, publicationTests } from '../../scripts/install-tests.mjs';
+import { buildIdentity } from '../../dist/droiddock/build-id.js';
 
 test('setup selects one physical phone, never a watch/emulator or ambiguous phones', () => {
   const phone = { serial: 'PHONE1', name: 'Phone', excluded: false };
@@ -88,6 +90,37 @@ test('setup never reuses another checkout or an unrelated service', async () => 
     assert.equal((await inspectPort(port, 'ours')).kind, 'ours');
   } finally { await new Promise(resolve => server.close(resolve)); }
   assert.equal((await inspectPort(port, 'ours')).kind, 'free');
+});
+
+test('setup preserves a connected session and never reports an unbuilt update as ready', { skip: process.platform !== 'win32' }, async () => {
+  const previousName = process.env.DROIDDOCK_DEVICE_NAME;
+  process.env.DROIDDOCK_DEVICE_NAME = 'Android phone';
+  let buildId = '0000000000000000';
+  const paths = [];
+  const server = createServer((request, response) => {
+    paths.push(request.url);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({
+      app: 'DroidDock', installationId, state: 'connected', buildId,
+      configurationId: createHash('sha256').update(JSON.stringify(['SYNTHETIC', 'git', 'Android phone', server.address().port])).digest('hex').slice(0, 16),
+    }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    const options = { adb: 'git', 'device-serial': 'SYNTHETIC', port: String(server.address().port) };
+    const stale = await setup(options);
+    assert.equal(stale.status, 'needs_action');
+    assert.equal(stale.stage, 'restart_needed');
+    buildId = buildIdentity(root);
+    const matchingBuiltFiles = await setup(options);
+    assert.equal(matchingBuiltFiles.status, 'needs_action');
+    assert.equal(matchingBuiltFiles.stage, 'active_session');
+    assert.ok(paths.every(path => path === '/api/status'));
+  } finally {
+    if (previousName === undefined) delete process.env.DROIDDOCK_DEVICE_NAME;
+    else process.env.DROIDDOCK_DEVICE_NAME = previousName;
+    await new Promise(resolve => server.close(resolve));
+  }
 });
 
 test('setup gate covers runtime tests and leaves only publication tooling to npm test', async () => {
