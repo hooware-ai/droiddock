@@ -26,7 +26,8 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36'
           cd android/paste-helper
-          bash ./gradlew assembleDebug --no-daemon --console=plain
+          # Fails if any downloaded build artifact is missing from, or differs from, gradle/verification-metadata.xml.
+          bash ./gradlew assembleDebug --dependency-verification strict --no-daemon --console=plain
   verify:
     timeout-minutes: 15
     strategy:

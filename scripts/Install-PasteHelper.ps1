@@ -46,8 +46,9 @@ $project = Join-Path $droidRoot 'android\paste-helper'
 $wrapper = Join-Path $project 'gradlew.bat'
 Push-Location $project
 try {
-  & $wrapper :assembleDebug --no-daemon --console=plain
-  if ($LASTEXITCODE -ne 0) { throw 'The optional Android paste helper did not build.' }
+  # Strict verification checks every downloaded build artifact against gradle/verification-metadata.xml.
+  & $wrapper :assembleDebug --dependency-verification strict --no-daemon --console=plain
+  if ($LASTEXITCODE -ne 0) { throw 'The optional Android paste helper did not build. A dependency verification failure means a downloaded build artifact did not match its pinned checksum; see docs/SETUP.md.' }
 } finally { Pop-Location }
 $apk = Join-Path $project 'build\outputs\apk\debug\DroidDockPasteHelper-debug.apk'
 if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'The paste helper APK was not produced.' }
