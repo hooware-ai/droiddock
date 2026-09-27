@@ -807,6 +807,8 @@
     send({ type: 'scroll', ...coordinates(event), dx: Math.max(-1, Math.min(1, -event.deltaX * unit / 100)), dy: Math.max(-1, Math.min(1, -event.deltaY * unit / 100)) });
   }, { passive: false });
   const keyboardKeys = { Escape: 'back', Home: 'moveHome', End: 'moveEnd', Delete: 'forwardDelete', PageUp: 'pageUp', PageDown: 'pageDown', Enter: 'enter', Backspace: 'backspace', Tab: 'tab', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  // Shift is forwarded only with these keys so it can extend an Android text selection.
+  const selectionKeys = new Set(['up', 'down', 'left', 'right', 'moveHome', 'moveEnd', 'pageUp', 'pageDown']);
   const maxPasteFileBytes = 16 * 1024 * 1024;
   function cancelFilePaste() {
     filePasteController?.abort();
@@ -905,7 +907,7 @@
     if (event.key === 'Escape' && holdEscapeFromSendingBack(event)) return;
     if (!canControl()) return;
     const key = keyboardKeys[event.key];
-    if (key) { event.preventDefault(); send({ type: 'key', key }); }
+    if (key) { event.preventDefault(); send(event.shiftKey && selectionKeys.has(key) ? { type: 'key', key, shift: true } : { type: 'key', key }); }
     else if (event.key.length === 1) { event.preventDefault(); send({ type: 'text', text: event.key }); }
   });
   keyButtons.forEach((button) => button.addEventListener('click', () => send({ type: 'key', key: button.dataset.key })));
