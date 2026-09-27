@@ -14,7 +14,7 @@ Run from the repository root. This entry point supports Windows PowerShell 5.1. 
 
 The installer reuses compatible Node.js 24+, PowerShell 7 (`pwsh`), and ADB executables. When needed, it installs WinGet packages `OpenJS.NodeJS.LTS`, `Microsoft.PowerShell`, and `Google.PlatformTools`. Its WinGet calls accept source and package agreements. Package policy, elevation, or restart requirements can still need user action. Use `-SkipDependencyInstall` to require existing prerequisites. Installing desktop scrcpy is optional: DroidDock includes its pinned device server.
 
-Setup installs locked npm dependencies, builds and checks the project, identifies the phone, creates or preserves ignored `config.local.json`, and launches the service. Open its returned URL and click **Connect**. The default port for a new configuration is 3210, but use the returned URL rather than assuming that port is free.
+Setup installs locked npm dependencies, builds the project, runs its installation tests (`npm run test:install`, the offline suite without publication and release-packaging checks), identifies the phone, creates or preserves ignored `config.local.json`, and launches the service. Open its returned URL and click **Connect**. The default port for a new configuration is 3210, but use the returned URL rather than assuming that port is free.
 
 | Option | Purpose |
 | --- | --- |
@@ -24,7 +24,7 @@ Setup installs locked npm dependencies, builds and checks the project, identifie
 | `-NoLaunch` | Prepare and validate installation without starting the service. |
 | `-SkipDependencyInstall` | Require existing platform dependencies. Missing tools remain a blocker. |
 
-The script calls `scripts/setup.mjs` once the runtime is available. Its structured result is `ready` (exit 0), `needs_action` (exit 2), or `error` (exit 1). Installation can also print progress. Read the result's detail/action fields; an interrupted or incomplete setup can be resumed by rerunning the same command. `ready` with `-NoLaunch` means prepared installation, not a running phone view.
+The script calls `scripts/setup.mjs` once the runtime is available. Its structured result is `ready` (exit 0), `needs_action` (exit 2), or `error` (exit 1). Installation can also print progress. Read the result's detail/action fields; an interrupted or incomplete setup can be resumed by rerunning the same command. An `error` with stage `offline_tests_failed` means an installation test failed; run `npm run test:install` in the checkout to see which one. Stage `offline_tests_timeout` means the tests did not finish within the time limit, for example on a busy computer; rerun setup when it is less busy. `ready` with `-NoLaunch` means prepared installation, not a running phone view.
 
 Without an explicit port override, setup can choose a nearby free port. With an explicit port, an occupied port is an error to resolve. Never stop an unrelated service to make space.
 

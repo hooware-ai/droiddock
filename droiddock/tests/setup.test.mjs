@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawnSync } from 'node:child_process';
-import { chooseDevice, parseArgs, inspectPort } from '../../scripts/setup.mjs';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chooseDevice, parseArgs, inspectPort, runInstallTests, INSTALL_TEST_TIMEOUT } from '../../scripts/setup.mjs';
+import { installTestFiles, publicationTests } from '../../scripts/install-tests.mjs';
 
 test('setup selects one physical phone, never a watch/emulator or ambiguous phones', () => {
   const phone = { serial: 'PHONE1', name: 'Phone', excluded: false };
@@ -68,6 +72,7 @@ test('setup CLI does not disclose a failed executable path or unknown argument',
     const result = spawnSync(process.execPath, ['scripts/setup.mjs', ...args], { encoding: 'utf8', timeout: 10000, windowsHide: true });
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stdout.trim()).status, 'error');
+    assert.equal(JSON.parse(result.stdout.trim()).stage, 'setup');
     assert.ok(!`${result.stdout}${result.stderr}`.includes(privateMarker));
   }
 });
@@ -83,4 +88,43 @@ test('setup never reuses another checkout or an unrelated service', async () => 
     assert.equal((await inspectPort(port, 'ours')).kind, 'ours');
   } finally { await new Promise(resolve => server.close(resolve)); }
   assert.equal((await inspectPort(port, 'ours')).kind, 'free');
+});
+
+test('setup gate covers runtime tests and leaves only publication tooling to npm test', async () => {
+  const files = installTestFiles().map(file => file.replaceAll('\\', '/'));
+  const all = (await readdir(new URL('.', import.meta.url))).filter(name => name.endsWith('.test.mjs'));
+  assert.deepEqual([...publicationTests], ['release.test.mjs']);
+  assert.deepEqual(files.map(file => file.split('/').at(-1)).sort(), all.filter(name => !publicationTests.includes(name)).sort());
+  for (const runtime of ['protocol', 'http', 'server-security', 'handoff', 'process', 'setup', 'diagnostics']) {
+    assert.ok(files.includes(`droiddock/tests/${runtime}.test.mjs`), runtime);
+  }
+  const scripts = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).scripts;
+  assert.equal(scripts.test, 'node --test droiddock/tests/*.test.mjs');
+  assert.equal(scripts['test:install'], 'node scripts/install-tests.mjs');
+  assert.equal(INSTALL_TEST_TIMEOUT, 120000);
+});
+
+test('setup reports a timed-out test gate separately from a failing one without echoing output', { timeout: 30000 }, async () => {
+  const privateMarker = 'SYNTHETIC_PRIVATE_VALUE';
+  const dir = await mkdtemp(join(tmpdir(), 'droiddock-gate-'));
+  // A nested `node --test` reports to this runner instead of running files when this is inherited.
+  const context = process.env.NODE_TEST_CONTEXT;
+  delete process.env.NODE_TEST_CONTEXT;
+  try {
+    const slow = join(dir, 'slow.test.mjs'), failing = join(dir, 'failing.test.mjs');
+    await writeFile(slow, "import { test } from 'node:test';\ntest('slow', () => new Promise(done => setTimeout(done, 5000)));\n");
+    await writeFile(failing, `import { test } from 'node:test';\ntest('fails', () => { console.log('${privateMarker}'); throw new Error('${privateMarker}'); });\n`);
+    const outcome = (files, timeout) => { try { runInstallTests(timeout, files); return null; } catch (error) { return error; } };
+    const timedOut = outcome([slow], 1000);
+    const failed = outcome([failing], 20000);
+    assert.equal(timedOut?.stage, 'offline_tests_timeout');
+    assert.match(timedOut.message, /did not finish within 1 seconds/);
+    assert.equal(failed?.stage, 'offline_tests_failed');
+    assert.match(failed.message, /npm run test:install/);
+    assert.notEqual(timedOut.message, failed.message);
+    for (const error of [timedOut, failed]) assert.ok(!error.message.includes(privateMarker) && !error.message.includes(dir));
+  } finally {
+    if (context !== undefined) process.env.NODE_TEST_CONTEXT = context;
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 });

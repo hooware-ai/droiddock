@@ -15,6 +15,7 @@
     "droiddock": "node dist/droiddock/server.js",
     "test": "node --test droiddock/tests/*.test.mjs",
     "test:droiddock": "npm test",
+    "test:install": "node scripts/install-tests.mjs",
     "typecheck": "tsc --noEmit",
     "check:public": "node scripts/check-public.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",

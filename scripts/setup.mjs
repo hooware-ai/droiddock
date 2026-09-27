@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { installTestFiles } from './install-tests.mjs';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const installationId = createHash('sha256').update(root.toLowerCase()).digest('hex').slice(0, 16);
@@ -33,8 +34,23 @@ export function chooseDevice(devices, requested) {
 
 function run(command, args, timeout = 15000, label = 'Required command') {
   const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024, shell: false });
+  // spawnSync reports an exceeded limit as ETIMEDOUT; keep that distinct from a failing command.
+  if (result.error?.code === 'ETIMEDOUT') throw Object.assign(new Error(`${label} did not finish within ${timeout / 1000} seconds. Check the local prerequisites and rerun; command output was withheld to protect local details.`), { timedOut: true });
   if (result.error || result.status !== 0) throw new Error(`${label} failed. Check the local prerequisites and rerun; command output was withheld to protect local details.`);
   return result.stdout?.trim() ?? '';
+}
+
+// The installation subset took about 5.5 s on a Windows 11 host (issue #77), so this
+// limit leaves wide headroom for slower or busy machines without adding retries.
+export const INSTALL_TEST_TIMEOUT = 120000;
+
+// Runs the runtime/installation test subset. Publication tooling stays in npm test and CI.
+export function runInstallTests(timeout = INSTALL_TEST_TIMEOUT, files = installTestFiles()) {
+  try { run(process.execPath, ['--test', ...files], timeout, 'Offline tests'); }
+  catch (error) {
+    if (error.timedOut) throw Object.assign(new Error(`Offline tests did not finish within ${timeout / 1000} seconds, so setup stopped before configuring a phone. The computer may be busy, for example with a security scan. Rerun setup when it is less busy; command output was withheld to protect local details.`), { stage: 'offline_tests_timeout' });
+    throw Object.assign(new Error('Offline tests failed, so setup stopped before configuring a phone. Run npm run test:install in this checkout to see which test failed; command output was withheld to protect local details.'), { stage: 'offline_tests_failed' });
+  }
 }
 
 export async function inspectPort(port, expectedId = installationId) {
@@ -120,7 +136,7 @@ export async function setup(options) {
   console.log('Installing locked dependencies and building DroidDock...');
   run(process.execPath, [npmCli, 'ci', '--ignore-scripts'], 300000, 'Dependency installation');
   run(process.execPath, [npmCli, 'run', 'build'], 120000, 'TypeScript build');
-  run(process.execPath, [npmCli, 'test'], 120000, 'Offline tests');
+  runInstallTests();
   // A fresh Windows ADB daemon must not inherit captured ancestor output pipes.
   run('pwsh', ['-NoProfile', '-File', join(root, 'scripts/Start-DroidDockAdb.ps1'), '-AdbPath', adb], 20000);
   const discovery = await discover(adb, requested);
@@ -151,5 +167,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const result = await setup(parseArgs(process.argv.slice(2)));
     console.log(JSON.stringify(result));
     process.exitCode = result.status === 'ready' ? 0 : 2;
-  } catch (error) { console.log(JSON.stringify({ status: 'error', stage: 'setup', message: error.message })); process.exitCode = 1; }
+  } catch (error) { console.log(JSON.stringify({ status: 'error', stage: error.stage ?? 'setup', message: error.message })); process.exitCode = 1; }
 }
