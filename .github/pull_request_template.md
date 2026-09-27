@@ -15,6 +15,7 @@ Describe relevant risks, upstream/provenance changes, and any substantial AI ass
 - [ ] I added meaningful regression coverage where behavior changed.
 - [ ] I documented live-phone checks performed or the remaining verification gap.
 - [ ] I updated affected documentation and preserved third-party licenses/provenance.
+- [ ] I added a CHANGELOG.md entry under Unreleased for a user- or contributor-facing change, citing this pull request, or none is needed.
 - [ ] I understand that maintainer review is required; AI assistance or CI success is not approval.
 
 For an unpatched security vulnerability, use private reporting in SECURITY.md instead of a public pull request.
