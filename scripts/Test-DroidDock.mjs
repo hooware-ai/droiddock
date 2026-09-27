@@ -82,6 +82,8 @@ async function readStatus(origin) {
   return status;
 }
 
+class RestartNeeded extends Error {}
+
 async function existingStatus(origin, root, config) {
   try {
     const status = await readStatus(origin);
@@ -89,10 +91,14 @@ async function existingStatus(origin, root, config) {
     if (status.installationId !== installationId) throw new Error('Different installation.');
     const configurationId = createHash('sha256').update(JSON.stringify([config.deviceSerial, config.adb, config.deviceName, config.port])).digest('hex').slice(0, 16);
     if (status.configurationId !== configurationId) throw new Error('Different configuration.');
+    // Never observe, or test beside, a service whose code or browser client differs from this checkout.
+    const { buildIdentity, RESTART_NEEDED } = await import('../dist/droiddock/build-id.js');
+    if (status.buildId !== buildIdentity(root)) throw new RestartNeeded(RESTART_NEEDED);
     return status;
   }
   catch (error) {
     if (error.cause?.code === 'ECONNREFUSED') return undefined;
+    if (error instanceof RestartNeeded) throw error;
     throw new Error('The configured port is unavailable, unrecognized, or belongs to another installation or configuration. Restart this installation or choose an unused port before --live; existing sessions were left untouched.');
   }
 }

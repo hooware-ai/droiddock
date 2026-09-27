@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebSocket } from 'ws';
@@ -154,10 +154,11 @@ test('handoff during session startup ignores obsolete callbacks and stale socket
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'pairing.js']) {
+    for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'build-id.js', 'pairing.js']) {
       await copyFile(join('dist/droiddock', name), join(fixtureDist, name));
     }
     await copyFile('dist/process.js', join(fixture, 'dist/process.js'));
+    await cp('droiddock/public', join(fixture, 'droiddock/public'), { recursive: true });
     // File gates make startup and late callbacks deterministic without touching the
     // real built session module or starting any discovery/ADB child process.
     await writeFile(join(fixtureDist, 'session.js'), `
@@ -263,10 +264,11 @@ async function withSessionFixture(name, sessionSource, run, extraEnv = {}) {
   const fixtureDist = join(fixture, 'dist/droiddock');
   try {
     await mkdir(fixtureDist, { recursive: true });
-    for (const file of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'pairing.js']) {
+    for (const file of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'build-id.js', 'pairing.js']) {
       await copyFile(join('dist/droiddock', file), join(fixtureDist, file));
     }
     await copyFile('dist/process.js', join(fixture, 'dist/process.js'));
+    await cp('droiddock/public', join(fixture, 'droiddock/public'), { recursive: true });
     await writeFile(join(fixtureDist, 'session.js'), sessionSource);
     await run(fixture, join(fixtureDist, 'server.js'), extraEnv);
   } finally {

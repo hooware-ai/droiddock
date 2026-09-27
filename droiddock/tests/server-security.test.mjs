@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -25,7 +25,8 @@ async function fixture(t, implementation, filePasteImplementation) {
   const root = await mkdtemp(join(base, 'security-test-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'pairing.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'build-id.js', 'pairing.js']) await copyFile(join('dist/droiddock', name), join(folder, name));
+  await cp('droiddock/public', join(root, 'droiddock/public'), { recursive: true });
   if (filePasteImplementation) await writeFile(join(folder, 'file-paste.js'), filePasteImplementation);
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
   await writeFile(join(folder, 'session.js'), implementation);
@@ -416,9 +417,10 @@ async function startupBridge(t) {
   const root = await mkdtemp(join(base, 'startup-cancel-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'pairing.js']) {
+  for (const name of ['server.js', 'session.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'build-id.js', 'pairing.js']) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
+  await cp('droiddock/public', join(root, 'droiddock/public'), { recursive: true });
   // Startup tests replace the process module; pairing is not invoked in this fixture.
   await writeFile(join(folder, 'pairing.js'), 'export const parsePairingRequest = () => undefined; export async function pairConfiguredPhone() { return "unavailable"; } export async function checkPairingEndpoint() { return "unavailable"; }');
   await writeFile(join(root, 'dist/process.js'), syntheticProcessModule({

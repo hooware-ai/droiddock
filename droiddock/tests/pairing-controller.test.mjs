@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebSocket } from 'ws';
@@ -23,11 +23,12 @@ async function fixture(t, sessionMode = 'error') {
   const root = await mkdtemp(join(base, 'pairing-controller-'));
   const folder = join(root, 'dist/droiddock');
   await mkdir(folder, { recursive: true });
-  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js']) {
+  for (const name of ['server.js', 'config.js', 'protocol.js', 'lock-state.js', 'file-paste.js', 'build-id.js']) {
     await copyFile(join('dist/droiddock', name), join(folder, name));
   }
   await copyFile('dist/droiddock/pairing.js', join(folder, 'pairing-real.js'));
   await copyFile('dist/process.js', join(root, 'dist/process.js'));
+  await cp('droiddock/public', join(root, 'droiddock/public'), { recursive: true });
   await writeFile(join(root, 'pair-mode'), 'success');
   await writeFile(join(root, 'discovery-mode'), 'available');
   await writeFile(join(root, 'verify-mode'), 'success');

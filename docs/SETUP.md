@@ -116,6 +116,20 @@ The diagnostic returns JSON with overall `ok` and individual checks: exit 0 for 
 
 **Packet checks do not prove browser rendering.** Open the returned URL, select Connect, and inspect actual phone video. Use harmless navigation to check input only when authorized. Do not send a message, buy something, or change a sensitive setting as a test. Report offline checks, device connectivity, and rendered video separately. A disconnected phone leaves live setup incomplete even if all offline tests pass.
 
+## Update an installation
+
+A running service keeps the server code and browser page it started with, even after the checkout changes. Restart it after every update so both come from the same build:
+
+1. Click **Disconnect** or close the controlling tab to finish the phone session.
+2. Update the checkout, for example with `git pull --ff-only`.
+3. Rerun `scripts/Install-DroidDock.ps1`. It installs dependencies, rebuilds, stops this installation's idle service, and relaunches it. With an active session it reports that and changes nothing.
+
+The installer never reports an active session as updated: even a matching compiled `buildId` cannot prove that newly pulled source has been rebuilt. Finish the session and rerun the installer.
+
+For a foreground service, stop `npm run droiddock` with Ctrl+C, then run `npm ci --ignore-scripts`, `npm run build`, and `npm run droiddock` again.
+
+`/api/status` includes a `buildId`: a non-secret hash of the compiled server and the served browser files, like the installation and configuration identifiers. The launcher, `scripts/phone.mjs`, and `Test-DroidDock.mjs --live` compare it with the checkout. On a mismatch they report **Restart needed** and leave the running service and its session unchanged. Opening the phone view is refused; status and disconnect still work and include `restartNeeded: true`, so the session can be settled first. A service started before build identifiers existed is treated as a mismatch.
+
 ## Recovery
 
 For concrete examples of USB authorization, missing tools, and wireless reconnects, see [troubleshooting](TROUBLESHOOTING.md).
@@ -130,6 +144,7 @@ For concrete examples of USB authorization, missing tools, and wireless reconnec
 | Invalid config | Repair invalid fields while preserving other settings. Do not blindly copy the example over it. |
 | Occupied port | Choose a verified free port with `-Port`; use the returned URL. |
 | Existing service uses different settings | Disconnect, close its controlling tab, stop only the verified installation, then relaunch. |
+| Restart needed (service from a different build) | Finish the phone session, then rerun the installer; see [update an installation](#update-an-installation). |
 | Connected label but blank video | Check WebCodecs support, browser errors, and connectivity; reconnect and inspect rendered frames. |
 | Phone open in another tab | Use that view, or deliberately click Connect in the requested new view to transfer control. |
 | Wi-Fi interruption | Restore connectivity and click Connect again; discover current endpoints. |

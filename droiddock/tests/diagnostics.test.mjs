@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import { loadConfig, inspectVendor, videoEvidence, verifyLive, diagnose, runCommand } from '../../scripts/Test-DroidDock.mjs';
+import { buildIdentity } from '../../dist/droiddock/build-id.js';
 
 const root = resolve('.');
 async function fixture(t) {
@@ -61,13 +62,13 @@ test('video evidence requires valid metadata and actual frame packets beyond cod
   assert.throws(() => videoEvidence(JSON.stringify({ type: 'status', state: 'error', message: 'PRIVATE123' }), false, evidence), error => !error.message.includes('PRIVATE123'));
 });
 
-async function statusServer(t, installation, moving = true, correctConfiguration = true) {
+async function statusServer(t, installation, moving = true, correctConfiguration = true, buildId = buildIdentity(root)) {
   let reads = 0, writes = 0, upgrades = 0;
   const server = createServer((req, res) => {
     if (req.method !== 'GET') writes++;
     res.setHeader('Content-Type', 'application/json');
     const configurationId = createHash('sha256').update(JSON.stringify([null, null, null, server.address().port])).digest('hex').slice(0, 16);
-    res.end(JSON.stringify({ app: 'DroidDock', state: 'connected', packets: moving ? ++reads : 1, installationId: installation, configurationId: correctConfiguration ? configurationId : 'different' }));
+    res.end(JSON.stringify({ app: 'DroidDock', state: 'connected', packets: moving ? ++reads : 1, installationId: installation, configurationId: correctConfiguration ? configurationId : 'different', ...(buildId === null ? {} : { buildId }) }));
   });
   server.on('upgrade', (_req, socket) => { upgrades++; socket.destroy(); });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -84,13 +85,19 @@ test('live observes advancing existing stream without opening a WebSocket or sen
   assert.deepEqual(server.effects(), { writes: 0, upgrades: 0 });
 });
 
-test('live refuses foreign installations and stalled streams without disturbing them', async t => {
+test('live refuses foreign installations, stale builds, and stalled streams without disturbing them', async t => {
   const foreign = await statusServer(t, 'another-installation');
   await assert.rejects(verifyLive({ root, config: { port: foreign.port }, timeoutMs: 300 }), /another installation/);
   assert.deepEqual(foreign.effects(), { writes: 0, upgrades: 0 });
   const changed = await statusServer(t, installationId(root), true, false);
   await assert.rejects(verifyLive({ root, config: { port: changed.port }, timeoutMs: 300 }), /another installation or configuration/);
   assert.deepEqual(changed.effects(), { writes: 0, upgrades: 0 });
+  // null models a service started before build identifiers existed.
+  for (const build of ['0000000000000000', null]) {
+    const stale = await statusServer(t, installationId(root), true, true, build);
+    await assert.rejects(verifyLive({ root, config: { port: stale.port }, timeoutMs: 300 }), /different build of this checkout\. Restart needed/);
+    assert.deepEqual(stale.effects(), { writes: 0, upgrades: 0 });
+  }
   const stalled = await statusServer(t, installationId(root), false);
   await assert.rejects(verifyLive({ root, config: { port: stalled.port }, timeoutMs: 300 }), /advancing video packets/);
   assert.deepEqual(stalled.effects(), { writes: 0, upgrades: 0 });

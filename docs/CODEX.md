@@ -30,7 +30,7 @@ pwsh -NoProfile -File scripts/Invoke-DroidDock.ps1 -Action status
 pwsh -NoProfile -File scripts/Invoke-DroidDock.ps1 -Action disconnect
 ```
 
-Status does not start a stopped service or open a phone stream. Disconnect ends the current phone session while leaving the service available. Helpers verify installation and configuration before acting and do not expose arbitrary Android or shell commands.
+Status does not start a stopped service or open a phone stream. If the running service was started from a different build of this checkout, `open` refuses to reuse it, while `status` and `disconnect` report `restartNeeded: true`; follow [update an installation](SETUP.md#update-an-installation). Disconnect ends the current phone session while leaving the service available. Helpers verify installation and configuration before acting and do not expose arbitrary Android or shell commands.
 
 ## Integrating with an agent
 
