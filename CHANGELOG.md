@@ -30,7 +30,7 @@ Changes are recorded here when they affect users or contributors, newest first, 
 - Live UTF-8 byte counter on fallback text input (`N / 300 bytes`), with an explicit over-limit state, associated help, and no silent truncation. (#19)
 - Keyboard and focus accessibility on the browser chrome: a rail focus outline with at least 3:1 contrast on its light backgrounds and a canvas outline tested against black, a connection status live region outside the details panel, Escape that closes that panel before sending Android Back, and offline tests of names, tab order, and keyboard behavior on a synthetic screen. (#12)
 - Compatibility notes that record CI coverage, intended setup requirements, and the empty live Android/browser matrix, plus how to report a sanitized result. (#11)
-- Dependency and workflow updates: TypeScript 7.0.2 (#1), `@types/node` 26.6.2 (#2, #46), CodeQL actions 4.38.1 (#3, #47), and `actions/upload-artifact` 7.0.1 (#4).
+- Dependency and workflow updates: TypeScript 7.0.2 (#1), `@types/node` 26.6.2 (#2, #46), CodeQL actions 4.38.2 (#3, #47, #96), and `actions/upload-artifact` 7.0.1 (#4).
 
 ## 0.1.0 - 2026-09-18
 
