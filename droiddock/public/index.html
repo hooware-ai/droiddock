@@ -76,7 +76,8 @@
             <ul>
               <li>Press Ctrl+C over the focused phone screen to copy the phone’s current selection to this computer, or choose Copy from phone in Details to copy what is already on the phone clipboard. Nothing is copied automatically.</li>
               <li>Text only, up to 256 KiB. If the browser blocks automatic copy, the text appears in Details with its own Copy button.</li>
-              <li>An empty or non-text phone clipboard sends nothing back, so the copy waits 5 seconds and then asks you to disconnect and connect again before the next copy.</li>
+              <li>An empty text reply is reported immediately. A phone clipboard with no text may return empty text immediately or send nothing back; in the latter case, the copy waits 5 seconds and asks you to disconnect and connect again before the next copy.</li>
+              <li>DroidDock waits for a browser clipboard write to finish before starting another copy. A write the browser already accepted may still finish after you leave the window.</li>
             </ul>
             <h3>Fallback text</h3>
             <ul>

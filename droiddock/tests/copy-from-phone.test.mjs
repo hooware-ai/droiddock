@@ -201,7 +201,7 @@ test('Help documents explicit copy, its limits, and the reconnect rule', () => {
   assert.match(html, /<h3>Copy from phone<\/h3>/);
   assert.match(html, /Press Ctrl\+C over the focused phone screen/);
   assert.match(html, /Nothing is copied automatically/);
-  assert.match(html, /sends nothing back, so the copy waits 5 seconds and then asks you to disconnect and connect again/);
+  assert.match(html, /may return empty text immediately or send nothing back/);
 });
 
 test('device parser holds at most one bounded frame, whatever the chunking', () => {
@@ -242,47 +242,54 @@ function controlledClipboard() {
   return { writes, writeTexts, globals: { navigator: { clipboard }, ClipboardItem, Blob: class {} } };
 }
 
-test('a delayed failure from an older copy never replaces a newer copy result', async () => {
+test('a newer copy cannot overtake an unfinished browser clipboard write', async () => {
   const board = controlledClipboard();
   const browser = loadBrowser({ globals: board.globals });
   const socket = deliverSyntheticFrame(browser, await startConnect(browser));
   browser.element('copy-from-phone').handlers.click();
   socket.receive({ type: 'phoneClipboard', text: 'OLDER_TEXT' });
   await flush();
+  const sent = socket.sent.length;
   dispatchKey(browser, browser.element('screen'), keyEvent('c', { ctrlKey: true }));
+  assert.equal(socket.sent.length, sent, 'second request waits for the first browser write');
+  assert.equal(board.writes.length, 1);
+  board.writes[0].resolve();
+  await flush();
+  assert.equal(browser.element('message').textContent, 'Copied from phone.');
+  dispatchKey(browser, browser.element('screen'), keyEvent('c', { ctrlKey: true }));
+  assert.deepEqual(socket.sent.at(-1), { type: 'copyFromPhone', source: 'selection' });
   socket.receive({ type: 'phoneClipboard', text: 'NEWER_TEXT' });
   board.writes[1].resolve();
   await flush();
-  assert.equal(browser.element('message').textContent, 'Copied from phone.');
-  board.writes[0].reject(new Error('NotAllowedError'));
-  await flush();
-  assert.equal(board.writeTexts.length, 0, 'the older request stops at its first stale check');
+  assert.equal(board.writeTexts.length, 0);
   assert.equal(browser.element('message').textContent, 'Copied from phone.');
   assert.equal(browser.element('phone-copy-fallback').hidden, true);
   assert.equal(browser.element('phone-copy-text').value, '');
 });
 
-test('a delayed success from an older copy never hides a newer fallback', async () => {
+test('a rejected browser write holds the slot through writeText fallback', async () => {
   const board = controlledClipboard();
   const browser = loadBrowser({ globals: board.globals });
   const socket = deliverSyntheticFrame(browser, await startConnect(browser));
   browser.element('copy-from-phone').handlers.click();
   socket.receive({ type: 'phoneClipboard', text: 'OLDER_TEXT' });
   await flush();
-  browser.element('copy-from-phone').handlers.click();
-  socket.receive({ type: 'phoneClipboard', text: 'NEWER_TEXT' });
-  board.writes[1].reject(new Error('NotAllowedError'));
+  board.writes[0].reject(new Error('NotAllowedError'));
   await flush();
+  const sent = socket.sent.length;
+  browser.element('copy-from-phone').handlers.click();
+  assert.equal(socket.sent.length, sent, 'fallback write is still pending');
   board.writeTexts[0].reject(new Error('NotAllowedError'));
   await flush();
-  assert.equal(browser.element('phone-copy-text').value, 'NEWER_TEXT');
+  assert.equal(browser.element('phone-copy-text').value, 'OLDER_TEXT');
   assert.equal(browser.element('phone-copy-fallback').hidden, false);
-  const fallbackStatus = browser.element('message').textContent;
-  board.writes[0].resolve();
+  browser.element('copy-from-phone').handlers.click();
+  assert.deepEqual(socket.sent.at(-1), { type: 'copyFromPhone', source: 'clipboard' });
+  socket.receive({ type: 'phoneClipboard', text: 'NEWER_TEXT' });
+  board.writes[1].resolve();
   await flush();
-  assert.equal(browser.element('message').textContent, fallbackStatus);
-  assert.equal(browser.element('phone-copy-text').value, 'NEWER_TEXT');
-  assert.equal(browser.element('phone-copy-fallback').hidden, false);
+  assert.equal(browser.element('phone-copy-text').value, '');
+  assert.equal(browser.element('phone-copy-fallback').hidden, true);
 });
 
 test('blur during a pending clipboard write never brings the fallback text back', async () => {
@@ -294,12 +301,45 @@ test('blur during a pending clipboard write never brings the fallback text back'
   await flush();
   browser.windowHandlers.blur();
   assert.match(browser.element('message').textContent, /interrupted because the window lost focus/);
+  browser.windowHandlers.focus?.();
+  const sent = socket.sent.length;
+  browser.element('copy-from-phone').handlers.click();
+  assert.equal(socket.sent.length, sent, 'a write that outlives blur still blocks another request');
   board.writes[0].reject(new Error('NotAllowedError'));
   await flush();
   assert.equal(board.writeTexts.length, 0);
-  browser.windowHandlers.focus?.();
+  browser.element('copy-from-phone').handlers.click();
+  assert.equal(socket.sent.length, sent + 1);
   await flush();
   assert.equal(browser.element('phone-copy-fallback').hidden, true);
   assert.equal(browser.element('phone-copy-text').value, '');
   assert.ok(!browser.element('message').textContent.includes(MARKER));
+});
+
+test('manual fallback Copy cannot race another request or update cleared UI', async () => {
+  const board = controlledClipboard();
+  const browser = loadBrowser({ globals: board.globals });
+  const socket = deliverSyntheticFrame(browser, await startConnect(browser));
+  browser.element('copy-from-phone').handlers.click();
+  socket.receive({ type: 'phoneClipboard', text: MARKER });
+  board.writes[0].reject(new Error('NotAllowedError'));
+  await flush();
+  board.writeTexts[0].reject(new Error('NotAllowedError'));
+  await flush();
+  assert.equal(browser.element('phone-copy-text').value, MARKER);
+  browser.element('phone-copy-button').handlers.click();
+  const sent = socket.sent.length;
+  browser.element('copy-from-phone').handlers.click();
+  assert.equal(socket.sent.length, sent);
+  browser.windowHandlers.blur();
+  const interrupted = browser.element('message').textContent;
+  board.writeTexts[1].resolve();
+  await flush();
+  assert.equal(browser.element('message').textContent, interrupted);
+  assert.equal(browser.element('phone-copy-text').value, '');
+  browser.windowHandlers.focus?.();
+  const afterFocus = socket.sent.length;
+  browser.element('copy-from-phone').handlers.click();
+  assert.equal(socket.sent.length, afterFocus + 1);
+  assert.deepEqual(socket.sent.at(-1), { type: 'copyFromPhone', source: 'clipboard' });
 });
