@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors, newest first, 
 
 ## Unreleased
 
+- Audio spike: `docs/AUDIO-SPIKE.md` compares ways to play phone audio through Windows and recommends browser Opus playback, backed by a synthetic-audio proof in `scripts/audio-spike.mjs` and parser tests. Production audio stays off. (#98)
 - The optional Android paste helper builds with Gradle 9.8.0. The new wrapper JAR and distribution match Gradle's published SHA-256 checksums, and the previous wrapper JAR's hash stays accepted in history. (#89)
 - The public check no longer fails every pull request while another branch changes a pinned file (the scrcpy server, its license, or the Gradle wrapper JAR), such as a pending Gradle wrapper update. Pinned files must still match exactly in the checked-in content and in `HEAD`'s history, and earlier reviewed pins can be listed so an upgrade needs no history rewrite. Privacy checks still cover every branch. (#94)
 - The optional Android paste helper build verifies a pinned SHA-256 checksum for every artifact it downloads, including the Android Gradle Plugin, its build dependencies, and the host-specific `aapt2` tool. `Install-PasteHelper.ps1` and CI build with `--dependency-verification strict`, and Dependabot now proposes plugin updates for review. See [Helper build dependency checksums](docs/SETUP.md#helper-build-dependency-checksums). (#88)
