@@ -203,3 +203,103 @@ test('Help documents explicit copy, its limits, and the reconnect rule', () => {
   assert.match(html, /Nothing is copied automatically/);
   assert.match(html, /sends nothing back, so the copy waits 5 seconds and then asks you to disconnect and connect again/);
 });
+
+test('device parser holds at most one bounded frame, whatever the chunking', () => {
+  const bound = 5 + CLIPBOARD_TEXT_MAX_BYTES;
+  const big = frame('y'.repeat(CLIPBOARD_TEXT_MAX_BYTES));
+  const small = [];
+  let tail = Buffer.from(big.subarray(bound - 1));
+  while (tail.length < 65536 - 8) { small.push(`s${small.length}`); tail = Buffer.concat([tail, frame(small.at(-1))]); }
+  const after = frame('after');
+  const chunks = [big.subarray(0, bound - 1), Buffer.concat([tail, after.subarray(0, 3)]), after.subarray(3)];
+  // Record every buffer the parser creates during push, including transient ones.
+  const sizes = [];
+  const original = { concat: Buffer.concat, alloc: Buffer.alloc, allocUnsafe: Buffer.allocUnsafe, from: Buffer.from };
+  Buffer.concat = (...args) => { const out = original.concat.apply(Buffer, args); sizes.push(out.length); return out; };
+  Buffer.alloc = (...args) => { sizes.push(args[0]); return original.alloc.apply(Buffer, args); };
+  Buffer.allocUnsafe = (...args) => { sizes.push(args[0]); return original.allocUnsafe.apply(Buffer, args); };
+  Buffer.from = (...args) => { const out = original.from.apply(Buffer, args); sizes.push(out.length); return out; };
+  const parser = new DeviceMessageParser();
+  let texts;
+  try { texts = chunks.flatMap(chunk => parser.push(chunk)); }
+  finally { Object.assign(Buffer, original); }
+  assert.ok(Math.max(0, ...sizes) <= bound, `largest parser buffer ${Math.max(...sizes)} exceeds ${bound}`);
+  assert.equal(texts.length, 2 + small.length);
+  assert.equal(texts[0].length, CLIPBOARD_TEXT_MAX_BYTES);
+  assert.deepEqual(texts.slice(1, -1), small);
+  assert.equal(texts.at(-1), 'after');
+  assert.equal(parser.bufferedBytes, 0);
+});
+
+function controlledClipboard() {
+  const writes = [], writeTexts = [];
+  const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); promise.catch(() => {}); return { promise, resolve, reject }; };
+  const clipboard = {
+    write() { const d = deferred(); writes.push(d); return d.promise; },
+    writeText(text) { const d = deferred(); d.text = text; writeTexts.push(d); return d.promise; },
+  };
+  class ClipboardItem { constructor(data) { this.data = data; } }
+  return { writes, writeTexts, globals: { navigator: { clipboard }, ClipboardItem, Blob: class {} } };
+}
+
+test('a delayed failure from an older copy never replaces a newer copy result', async () => {
+  const board = controlledClipboard();
+  const browser = loadBrowser({ globals: board.globals });
+  const socket = deliverSyntheticFrame(browser, await startConnect(browser));
+  browser.element('copy-from-phone').handlers.click();
+  socket.receive({ type: 'phoneClipboard', text: 'OLDER_TEXT' });
+  await flush();
+  dispatchKey(browser, browser.element('screen'), keyEvent('c', { ctrlKey: true }));
+  socket.receive({ type: 'phoneClipboard', text: 'NEWER_TEXT' });
+  board.writes[1].resolve();
+  await flush();
+  assert.equal(browser.element('message').textContent, 'Copied from phone.');
+  board.writes[0].reject(new Error('NotAllowedError'));
+  await flush();
+  assert.equal(board.writeTexts.length, 0, 'the older request stops at its first stale check');
+  assert.equal(browser.element('message').textContent, 'Copied from phone.');
+  assert.equal(browser.element('phone-copy-fallback').hidden, true);
+  assert.equal(browser.element('phone-copy-text').value, '');
+});
+
+test('a delayed success from an older copy never hides a newer fallback', async () => {
+  const board = controlledClipboard();
+  const browser = loadBrowser({ globals: board.globals });
+  const socket = deliverSyntheticFrame(browser, await startConnect(browser));
+  browser.element('copy-from-phone').handlers.click();
+  socket.receive({ type: 'phoneClipboard', text: 'OLDER_TEXT' });
+  await flush();
+  browser.element('copy-from-phone').handlers.click();
+  socket.receive({ type: 'phoneClipboard', text: 'NEWER_TEXT' });
+  board.writes[1].reject(new Error('NotAllowedError'));
+  await flush();
+  board.writeTexts[0].reject(new Error('NotAllowedError'));
+  await flush();
+  assert.equal(browser.element('phone-copy-text').value, 'NEWER_TEXT');
+  assert.equal(browser.element('phone-copy-fallback').hidden, false);
+  const fallbackStatus = browser.element('message').textContent;
+  board.writes[0].resolve();
+  await flush();
+  assert.equal(browser.element('message').textContent, fallbackStatus);
+  assert.equal(browser.element('phone-copy-text').value, 'NEWER_TEXT');
+  assert.equal(browser.element('phone-copy-fallback').hidden, false);
+});
+
+test('blur during a pending clipboard write never brings the fallback text back', async () => {
+  const board = controlledClipboard();
+  const browser = loadBrowser({ globals: board.globals });
+  const socket = deliverSyntheticFrame(browser, await startConnect(browser));
+  browser.element('copy-from-phone').handlers.click();
+  socket.receive({ type: 'phoneClipboard', text: MARKER });
+  await flush();
+  browser.windowHandlers.blur();
+  assert.match(browser.element('message').textContent, /interrupted because the window lost focus/);
+  board.writes[0].reject(new Error('NotAllowedError'));
+  await flush();
+  assert.equal(board.writeTexts.length, 0);
+  browser.windowHandlers.focus?.();
+  await flush();
+  assert.equal(browser.element('phone-copy-fallback').hidden, true);
+  assert.equal(browser.element('phone-copy-text').value, '');
+  assert.ok(!browser.element('message').textContent.includes(MARKER));
+});

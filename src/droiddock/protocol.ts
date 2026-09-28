@@ -137,21 +137,38 @@ export class DeviceProtocolError extends Error {
 
 // Bounded incremental parser for the control socket's device messages. Only
 // CLIPBOARD is expected: pastes use sequence 0 (no ACK) and UHID is never used.
+// Each frame is copied straight into a buffer sized from its validated header,
+// so at most 5 + CLIPBOARD_TEXT_MAX_BYTES bytes are held, whatever the chunking.
 export class DeviceMessageParser {
-  private buffer: Buffer = Buffer.alloc(0);
+  private readonly header = Buffer.alloc(5);
+  private headerLength = 0;
+  private body?: Buffer;
+  private bodyLength = 0;
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
+  get bufferedBytes(): number { return this.headerLength + (this.body?.length ?? 0); }
   push(chunk: Buffer): string[] {
-    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
     const texts: string[] = [];
-    while (this.buffer.length) {
-      if (this.buffer[0] !== 0) throw new DeviceProtocolError();
-      if (this.buffer.length < 5) break;
-      const length = this.buffer.readUInt32BE(1);
-      if (length > CLIPBOARD_TEXT_MAX_BYTES) throw new DeviceProtocolError();
-      if (this.buffer.length < 5 + length) break;
-      try { texts.push(this.decoder.decode(this.buffer.subarray(5, 5 + length))); }
+    let offset = 0;
+    while (offset < chunk.length || (this.body && this.bodyLength === this.body.length)) {
+      if (!this.body) {
+        const take = Math.min(5 - this.headerLength, chunk.length - offset);
+        chunk.copy(this.header, this.headerLength, offset, offset + take);
+        this.headerLength += take; offset += take;
+        if (this.header[0] !== 0) throw new DeviceProtocolError();
+        if (this.headerLength < 5) break;
+        const length = this.header.readUInt32BE(1);
+        if (length > CLIPBOARD_TEXT_MAX_BYTES) throw new DeviceProtocolError();
+        this.body = Buffer.alloc(length); this.bodyLength = 0;
+      }
+      const take = Math.min(this.body.length - this.bodyLength, chunk.length - offset);
+      chunk.copy(this.body, this.bodyLength, offset, offset + take);
+      this.bodyLength += take; offset += take;
+      if (this.bodyLength < this.body.length) break;
+      let text: string;
+      try { text = this.decoder.decode(this.body); }
       catch { throw new DeviceProtocolError(); }
-      this.buffer = Buffer.from(this.buffer.subarray(5 + length));
+      texts.push(text);
+      this.body = undefined; this.bodyLength = 0; this.headerLength = 0;
     }
     return texts;
   }

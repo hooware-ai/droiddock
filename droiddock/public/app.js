@@ -822,14 +822,21 @@
   // Explicit copy from phone: one request at a time, never automatic. Text stays
   // only in this deferred and, if the browser refuses the write, the fallback field.
   let phoneCopy = null;
+  // The one request allowed to update status or the fallback field. A newer copy, closing
+  // Details, blur, or disconnect replaces or clears it, so a delayed older write can't win.
+  let latestCopy = null;
   const clipboardApi = () => (typeof navigator === 'undefined' ? null : navigator.clipboard || null);
   function copyStatus(text, error = false) {
     $('message').textContent = text;
     $('message').classList.toggle('error', error);
   }
   function hidePhoneCopyText() {
+    latestCopy = null;
     $('phone-copy-text').value = '';
     $('phone-copy-fallback').hidden = true;
+  }
+  function copyStillCurrent(pending) {
+    return latestCopy === pending && pending.generation === generation && canControl() && browserFocused && !document.hidden;
   }
   function clearPhoneCopy() {
     phoneCopy?.reject(new Error('Copy cancelled.'));
@@ -854,6 +861,7 @@
       } catch { pending.written = null; }
     }
     phoneCopy = pending;
+    latestCopy = pending;
     if (!send({ type: 'copyFromPhone', source })) { clearPhoneCopy(); return; }
     copyStatus('Copying from phone…');
   }
@@ -861,13 +869,18 @@
     const pending = phoneCopy;
     if (!pending || pending.generation !== generation) return;
     phoneCopy = null;
-    if (text === '') { pending.reject(new Error('Empty clipboard.')); copyStatus('Phone clipboard is empty.'); return; }
+    if (text === '') {
+      pending.reject(new Error('Empty clipboard.'));
+      if (copyStillCurrent(pending)) { latestCopy = null; copyStatus('Phone clipboard is empty.'); }
+      return;
+    }
     pending.resolve(text);
     let copied = pending.written ? await pending.written.then(() => true, () => false) : false;
+    if (!copyStillCurrent(pending)) return;
     const clipboard = clipboardApi();
     if (!copied && clipboard?.writeText) copied = await clipboard.writeText(text).then(() => true, () => false);
-    if (pending.generation !== generation || !canControl()) return;
-    if (copied) { copyStatus('Copied from phone.'); return; }
+    if (!copyStillCurrent(pending)) return;
+    if (copied) { latestCopy = null; copyStatus('Copied from phone.'); return; }
     $('phone-copy-text').value = text;
     $('phone-copy-fallback').hidden = false;
     $('more-controls').open = true;
@@ -879,6 +892,7 @@
     const pending = phoneCopy;
     if (!pending || pending.generation !== generation) return;
     phoneCopy = null;
+    if (latestCopy === pending) latestCopy = null;
     pending.reject(new Error('Copy failed.'));
     copyStatus(typeof message === 'string' && message ? message : 'Copy from phone failed. Check the connection and try again.', true);
   }
@@ -1117,7 +1131,11 @@
     event.preventDefault();
     closeHelpControls();
   });
-  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); hidePhoneCopyText(); syncLockSubscription(); syncStreamStats(); });
+  window.addEventListener('blur', () => {
+    browserFocused = false; closePin(false); closePair();
+    if (latestCopy) copyStatus('Copy from phone was interrupted because the window lost focus. Try again.');
+    hidePhoneCopyText(); syncLockSubscription(); syncStreamStats();
+  });
   $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); syncStreamStats(); });
   window.addEventListener('pagehide', () => { closePin(false); closePair(); disconnect(); });
