@@ -131,7 +131,7 @@
     if (next !== 'connected' && state === 'connected') cancelZoom();
     if (next === 'idle' || next === 'error' || next === 'moved') setMapZoom(false);
     state = next;
-    if (next !== 'connected') cancelFilePaste();
+    if (next !== 'connected') { cancelFilePaste(); clearPhoneCopy(); }
     const labels = { idle: 'Disconnected', connecting: 'Connecting', connected: 'Connected', moved: 'Opened elsewhere', error: 'Connection error' };
     const label = labels[next] || next;
     assignText($('state'), label);
@@ -191,6 +191,7 @@
       for (const id of ['pin-input', 'send-pin', 'pin-backspace', 'pin-enter']) $(id).disabled = disabled;
       $('map-zoom').disabled = disabled;
       $('choose-file').disabled = disabled;
+      $('copy-from-phone').disabled = disabled;
       if (disabled) clearPin();
     }
   }
@@ -575,6 +576,10 @@
             }
             if (message.state === 'connected' && !hasFrame) setState('connecting', 'Waiting for the live screen.');
             else if (message.state === 'connected' || message.state === 'connecting') setState(message.state, message.message);
+          } else if (message.type === 'phoneClipboard') {
+            if (typeof message.text === 'string') void receivePhoneCopy(message.text);
+          } else if (message.type === 'copyError') {
+            failPhoneCopy(message.message);
           } else if (message.type === 'inputError') {
             $('message').textContent = message.message || 'The phone could not receive that input. Try again.';
             $('message').classList.add('error');
@@ -814,6 +819,69 @@
     filePasteController?.abort();
     filePasteController = null;
   }
+  // Explicit copy from phone: one request at a time, never automatic. Text stays
+  // only in this deferred and, if the browser refuses the write, the fallback field.
+  let phoneCopy = null;
+  const clipboardApi = () => (typeof navigator === 'undefined' ? null : navigator.clipboard || null);
+  function copyStatus(text, error = false) {
+    $('message').textContent = text;
+    $('message').classList.toggle('error', error);
+  }
+  function hidePhoneCopyText() {
+    $('phone-copy-text').value = '';
+    $('phone-copy-fallback').hidden = true;
+  }
+  function clearPhoneCopy() {
+    phoneCopy?.reject(new Error('Copy cancelled.'));
+    phoneCopy = null;
+    hidePhoneCopyText();
+  }
+  function copyFromPhone(source) {
+    if (!canControl()) return;
+    if (phoneCopy) { copyStatus('A copy from the phone is already in progress.'); return; }
+    hidePhoneCopyText();
+    let resolve, reject;
+    const text = new Promise((done, fail) => { resolve = done; reject = fail; });
+    text.catch(() => {});
+    const pending = { generation, resolve, reject, written: null };
+    // Start the write inside this gesture so browsers that need user activation keep it
+    // while the phone answers; later fallbacks run only if this path is unavailable or refused.
+    const clipboard = clipboardApi();
+    if (typeof ClipboardItem === 'function' && clipboard?.write) {
+      try {
+        pending.written = clipboard.write([new ClipboardItem({ 'text/plain': text.then((value) => new Blob([value], { type: 'text/plain' })) })]);
+        pending.written.catch(() => {});
+      } catch { pending.written = null; }
+    }
+    phoneCopy = pending;
+    if (!send({ type: 'copyFromPhone', source })) { clearPhoneCopy(); return; }
+    copyStatus('Copying from phone…');
+  }
+  async function receivePhoneCopy(text) {
+    const pending = phoneCopy;
+    if (!pending || pending.generation !== generation) return;
+    phoneCopy = null;
+    if (text === '') { pending.reject(new Error('Empty clipboard.')); copyStatus('Phone clipboard is empty.'); return; }
+    pending.resolve(text);
+    let copied = pending.written ? await pending.written.then(() => true, () => false) : false;
+    const clipboard = clipboardApi();
+    if (!copied && clipboard?.writeText) copied = await clipboard.writeText(text).then(() => true, () => false);
+    if (pending.generation !== generation || !canControl()) return;
+    if (copied) { copyStatus('Copied from phone.'); return; }
+    $('phone-copy-text').value = text;
+    $('phone-copy-fallback').hidden = false;
+    $('more-controls').open = true;
+    $('phone-copy-text').focus();
+    $('phone-copy-text').select?.();
+    copyStatus('Your browser didn’t allow automatic copy. Use Copy below, or select the text.');
+  }
+  function failPhoneCopy(message) {
+    const pending = phoneCopy;
+    if (!pending || pending.generation !== generation) return;
+    phoneCopy = null;
+    pending.reject(new Error('Copy failed.'));
+    copyStatus(typeof message === 'string' && message ? message : 'Copy from phone failed. Check the connection and try again.', true);
+  }
   async function pasteFile(file) {
     if (!canControl() || !pasteCapability) return;
     if (filePasteController) {
@@ -900,6 +968,13 @@
     return true;
   }
   canvas.addEventListener('keydown', (event) => {
+    // Ctrl+C on the live phone screen copies the phone's current selection to this computer.
+    if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing && !event.repeat &&
+        (event.key === 'c' || event.key === 'C') && canControl()) {
+      event.preventDefault();
+      copyFromPhone('selection');
+      return;
+    }
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
     // Keep normal Tab navigation available; use text entry for tab characters.
     if (event.key === 'Tab') return;
@@ -1020,8 +1095,16 @@
     if ($('more-controls').open) {
       closePin(true);
       $('help-controls').open = false;
-    }
+    } else hidePhoneCopyText();
     syncStreamStats();
+  });
+  $('copy-from-phone').addEventListener('click', () => copyFromPhone('clipboard'));
+  $('phone-copy-button').addEventListener('click', () => {
+    const text = $('phone-copy-text').value;
+    const clipboard = clipboardApi();
+    if (!text || !clipboard?.writeText) { copyStatus('Select the text and press Ctrl+C to copy it.'); return; }
+    clipboard.writeText(text).then(() => { hidePhoneCopyText(); copyStatus('Copied from phone.'); },
+      () => copyStatus('Copy was blocked. Select the text and press Ctrl+C to copy it.'));
   });
   $('stream-stats-toggle').addEventListener('change', syncStreamStats);
   $('help-controls').addEventListener('toggle', () => {
@@ -1034,7 +1117,7 @@
     event.preventDefault();
     closeHelpControls();
   });
-  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); syncLockSubscription(); syncStreamStats(); });
+  window.addEventListener('blur', () => { browserFocused = false; closePin(false); closePair(); hidePhoneCopyText(); syncLockSubscription(); syncStreamStats(); });
   $('map-zoom').addEventListener('click', () => { if (canControl()) setMapZoom(!mapZoom); });
   window.addEventListener('focus', () => { browserFocused = true; syncLockSubscription(); syncStreamStats(); });
   window.addEventListener('pagehide', () => { closePin(false); closePair(); disconnect(); });

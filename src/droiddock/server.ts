@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { ScrcpySession, type RecoveryHint } from "./session.js";
-import { SCRCPY_VERSION } from "./protocol.js";
+import { SCRCPY_VERSION, CopyFromPhoneError } from "./protocol.js";
 import { config } from "./config.js";
 import { LockStateMonitor } from "./lock-state.js";
 import { HostPasteCleanup, pasteMime, PasteFileError, stagePasteFile } from "./file-paste.js";
@@ -367,6 +367,18 @@ sockets.on("connection", (ws: WebSocket) => {
         if (typeof input.enabled !== "boolean" || typeof input.visible !== "boolean" ||
             Object.keys(input).some(key => !["type", "enabled", "visible"].includes(key))) throw new Error("Invalid lock-state subscription.");
         lockMonitor.subscribe(input.enabled, input.visible);
+        return;
+      }
+      if (input?.type === "copyFromPhone") {
+        if (Object.keys(input).length !== 2 || (input.source !== "selection" && input.source !== "clipboard")) throw new Error("Invalid copy request.");
+        if (state !== "connected" || !session) throw new Error("Connect your phone first.");
+        const owner = ws, current = session;
+        // Deliver only to the controller that asked, while it still owns this session.
+        const deliver = (message: object) => {
+          if (client === owner && session === current && owner.readyState === WebSocket.OPEN) owner.send(JSON.stringify(message));
+        };
+        current.copyFromPhone(input.source).then(text => deliver({ type: "phoneClipboard", text }), (error: unknown) =>
+          deliver({ type: "copyError", message: error instanceof CopyFromPhoneError ? error.message : "Copy from phone failed. Check the connection and try again." }));
         return;
       }
       if (state !== "connected" || !session) throw new Error("Connect your phone first.");
