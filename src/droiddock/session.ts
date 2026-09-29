@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { runChecked } from "../process.js";
 import { config } from "./config.js";
 import { parseLockState, type LockState } from "./lock-state.js";
-import { VideoParser, SCRCPY_VERSION, SERVER_SHA256, encodeControl, type VideoEvent } from "./protocol.js";
+import { VideoParser, SCRCPY_VERSION, SERVER_SHA256, encodeControl, encodeGetClipboard, DeviceMessageParser, CopyFromPhoneError, COPY_MESSAGES, type CopySource, type VideoEvent } from "./protocol.js";
 
 export const CONNECTION_PROGRESS = {
   findingPhone: "Finding the configured phone…",
@@ -39,6 +39,10 @@ export class ScrcpySession {
   private closed = false;
   private remoteMayExist = false;
   private pastePending?: Promise<boolean>;
+  // Replies carry no request ID. Once a request times out or is cancelled while
+  // a reply may still arrive, this control socket never serves another copy.
+  private copyState: "ready" | "pending" | "unsettled" | "failed" = "ready";
+  private copyWaiter?: { resolve: (text: string) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
   private readonly pasteCleanup = new Map<string, { remote: boolean; privateFile: boolean }>();
   private readonly scid = randomInt(1, 0x7fffffff).toString(16).padStart(8, "0");
   private readonly remote = `/data/local/tmp/droiddock-${this.scid}.jar`;
@@ -134,12 +138,7 @@ export class ScrcpySession {
     if (!this.video) throw new Error("The phone did not open its video stream. Check the phone connection and reconnect.");
     this.video.on("error", () => { if (!this.closed) this.onFailure("The phone video connection was lost."); });
     this.video.on("close", () => { if (!this.closed) this.onFailure("Phone disconnected. Check Wi-Fi and reconnect."); });
-    this.control = createConnection({ host: "127.0.0.1", port: this.port });
-    this.control.setNoDelay(true);
-    this.control.on("error", () => { if (!this.closed) this.onFailure("The phone control connection was lost."); });
-    this.control.on("close", () => { if (!this.closed) this.onFailure("The phone control connection closed."); });
-    // Autosync is disabled. Drain protocol acknowledgements without retaining content.
-    this.control.on("data", () => {});
+    this.attachControl(createConnection({ host: "127.0.0.1", port: this.port }));
     const parser = new VideoParser();
     this.video.on("data", (chunk: Buffer) => {
       try { for (const event of parser.push(chunk)) this.onEvent(event); }
@@ -246,6 +245,59 @@ export class ScrcpySession {
     if (this.pasteCleanup.size) throw new Error("Phone paste cleanup could not be confirmed.");
   }
 
+  private attachControl(control: Socket): void {
+    this.control = control;
+    control.setNoDelay(true);
+    control.on("error", () => { if (!this.closed) this.onFailure("The phone control connection was lost."); });
+    control.on("close", () => { if (!this.closed) this.onFailure("The phone control connection closed."); });
+    // Autosync is disabled, so the only expected device message answers an
+    // explicit copy request. Clipboard text is never logged or retained here.
+    const deviceMessages = new DeviceMessageParser();
+    control.on("data", (chunk: Buffer) => {
+      if (this.copyState === "failed") return;
+      let texts: string[];
+      try { texts = deviceMessages.push(chunk); }
+      catch { this.settleCopy("failed", new CopyFromPhoneError(COPY_MESSAGES.reconnect)); return; }
+      for (const text of texts) this.receiveClipboard(text);
+    });
+  }
+
+  private receiveClipboard(text: string): void {
+    const waiter = this.copyWaiter;
+    // A reply without a pending request, including a late one, is discarded.
+    if (this.copyState !== "pending" || !waiter) return;
+    this.copyWaiter = undefined;
+    clearTimeout(waiter.timer);
+    this.copyState = "ready";
+    waiter.resolve(text);
+  }
+
+  private settleCopy(next: "unsettled" | "failed", error: Error): void {
+    if (this.copyState !== "failed") this.copyState = next;
+    const waiter = this.copyWaiter;
+    this.copyWaiter = undefined;
+    if (waiter) { clearTimeout(waiter.timer); waiter.reject(error); }
+  }
+
+  copyFromPhone(source: CopySource, timeoutMs = 5000): Promise<string> {
+    if (this.closed || !this.control || this.control.destroyed) return Promise.reject(new Error("Connect your phone first."));
+    if (this.copyState === "pending") return Promise.reject(new CopyFromPhoneError(COPY_MESSAGES.busy));
+    if (this.copyState !== "ready") return Promise.reject(new CopyFromPhoneError(COPY_MESSAGES.reconnect));
+    if (this.control.writableLength > 65536) return Promise.reject(new Error("Phone input is congested. Reconnect."));
+    const request = encodeGetClipboard(source);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => this.settleCopy("unsettled", new CopyFromPhoneError(COPY_MESSAGES.timeout)), timeoutMs);
+      this.copyState = "pending";
+      this.copyWaiter = { resolve, reject, timer };
+      this.control!.write(request);
+    });
+  }
+
+  // A cancelled request may still be answered later, so the socket stays unusable for copy.
+  cancelCopy(): void {
+    if (this.copyState === "pending") this.settleCopy("unsettled", new CopyFromPhoneError(COPY_MESSAGES.reconnect));
+  }
+
   input(value: unknown): void {
     if (this.closed || !this.control || this.control.destroyed) throw new Error("Connect your phone first.");
     if (this.control.writableLength > 65536) throw new Error("Phone input is congested. Reconnect.");
@@ -254,6 +306,7 @@ export class ScrcpySession {
 
   async stop(): Promise<void> {
     this.closed = true;
+    this.cancelCopy();
     this.video?.destroy(); this.control?.destroy(); this.child?.kill();
     await this.pastePending?.catch(() => {});
     let cleanupFailed = false;

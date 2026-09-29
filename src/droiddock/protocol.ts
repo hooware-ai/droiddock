@@ -108,3 +108,68 @@ export function encodeControl(input: unknown): Buffer[] {
   }
   throw new Error("Unsupported control message.");
 }
+
+// Explicit copy from phone. scrcpy 4.1 GET_CLIPBOARD is [8, copyKey]; the
+// device replies with CLIPBOARD [0, u32 length, UTF-8], truncated server-side
+// to 262,139 bytes, and sends nothing when the clipboard holds no text.
+export const CLIPBOARD_TEXT_MAX_BYTES = (1 << 18) - 5;
+export type CopySource = "selection" | "clipboard";
+export function encodeGetClipboard(source: CopySource): Buffer {
+  // "selection" injects Android COPY first; CUT is intentionally unreachable.
+  if (source !== "selection" && source !== "clipboard") throw new Error("Unsupported copy source.");
+  return Buffer.from([8, source === "selection" ? 1 : 0]);
+}
+
+export const COPY_MESSAGES = {
+  busy: "A copy from the phone is already in progress.",
+  timeout: "No text came back from the phone within 5 seconds. Its clipboard may be empty or hold non-text content, or Android blocked access. Disconnect and connect again to copy again.",
+  reconnect: "Copy from phone needs a fresh connection. Disconnect and connect again to copy.",
+} as const;
+
+// Carries only the fixed COPY_MESSAGES text, never clipboard content.
+export class CopyFromPhoneError extends Error {
+  constructor(message: string) { super(message); this.name = "CopyFromPhoneError"; }
+}
+
+export class DeviceProtocolError extends Error {
+  constructor() { super("Unexpected phone control message."); this.name = "DeviceProtocolError"; }
+}
+
+// Bounded incremental parser for the control socket's device messages. Only
+// CLIPBOARD is expected: pastes use sequence 0 (no ACK) and UHID is never used.
+// Each frame is copied straight into a buffer sized from its validated header,
+// so at most 5 + CLIPBOARD_TEXT_MAX_BYTES bytes are held, whatever the chunking.
+export class DeviceMessageParser {
+  private readonly header = Buffer.alloc(5);
+  private headerLength = 0;
+  private body?: Buffer;
+  private bodyLength = 0;
+  private readonly decoder = new TextDecoder("utf-8", { fatal: true });
+  get bufferedBytes(): number { return this.headerLength + (this.body?.length ?? 0); }
+  push(chunk: Buffer): string[] {
+    const texts: string[] = [];
+    let offset = 0;
+    while (offset < chunk.length || (this.body && this.bodyLength === this.body.length)) {
+      if (!this.body) {
+        const take = Math.min(5 - this.headerLength, chunk.length - offset);
+        chunk.copy(this.header, this.headerLength, offset, offset + take);
+        this.headerLength += take; offset += take;
+        if (this.header[0] !== 0) throw new DeviceProtocolError();
+        if (this.headerLength < 5) break;
+        const length = this.header.readUInt32BE(1);
+        if (length > CLIPBOARD_TEXT_MAX_BYTES) throw new DeviceProtocolError();
+        this.body = Buffer.alloc(length); this.bodyLength = 0;
+      }
+      const take = Math.min(this.body.length - this.bodyLength, chunk.length - offset);
+      chunk.copy(this.body, this.bodyLength, offset, offset + take);
+      this.bodyLength += take; offset += take;
+      if (this.bodyLength < this.body.length) break;
+      let text: string;
+      try { text = this.decoder.decode(this.body); }
+      catch { throw new DeviceProtocolError(); }
+      texts.push(text);
+      this.body = undefined; this.bodyLength = 0; this.headerLength = 0;
+    }
+    return texts;
+  }
+}

@@ -77,7 +77,7 @@ function makeElement(extra = {}) {
   };
 }
 
-function loadBrowser({ localStorage, focused = true, hidden = false, clock = false, fetchImpl, now, source = appSource } = {}) {
+function loadBrowser({ localStorage, focused = true, hidden = false, clock = false, fetchImpl, now, source = appSource, globals = {} } = {}) {
   const elements = new Map();
   const root = makeElement();
   const documentHandlers = {};
@@ -173,6 +173,7 @@ function loadBrowser({ localStorage, focused = true, hidden = false, clock = fal
     Uint8Array,
     DataView,
     performance: { now: now || (() => 0) },
+    ...globals,
   });
   return {
     element, root, keyButtons, summary, more, help, helpSummary, sockets, documentHandlers, windowHandlers, documentState, FakeVideoDecoder, requests,
