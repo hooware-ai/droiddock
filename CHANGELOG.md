@@ -4,6 +4,7 @@ Changes are recorded here when they affect users or contributors, newest first, 
 
 ## Unreleased
 
+- Audio spike: `docs/AUDIO-SPIKE.md` compares ways to play phone audio through Windows and recommends browser Opus playback. A synthetic probe in `scripts/audio-spike.mjs` measures decoder and scheduling behavior and records its observed underruns; production audio stays off. (#98)
 - Explicit copy from phone: Ctrl+C on the focused phone screen copies the phone's selection, and Copy from phone in Details copies the phone clipboard, to this computer. One request at a time goes only to the current controller; replies are parsed with strict bounds, never logged or persisted, and automatic clipboard sync stays off. A timed-out or cancelled request locks copying on that phone connection until you reconnect, so a late reply is never attributed to a later copy. (#97)
 - The optional Android paste helper builds with Gradle 9.8.0. The new wrapper JAR and distribution match Gradle's published SHA-256 checksums, and the previous wrapper JAR's hash stays accepted in history. (#89)
 - The public check no longer fails every pull request while another branch changes a pinned file (the scrcpy server, its license, or the Gradle wrapper JAR), such as a pending Gradle wrapper update. Pinned files must still match exactly in the checked-in content and in `HEAD`'s history, and earlier reviewed pins can be listed so an upgrade needs no history rewrite. Privacy checks still cover every branch. (#94)
