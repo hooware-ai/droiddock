@@ -23,10 +23,10 @@
     "verify": "npm run build && npm test && npm run check:public && npm run check:links",
     "release:package": "node scripts/package-release.mjs"
   },
-  "dependencies": { "ws": "8.21.3" },
+  "dependencies": { "ws": "8.22.0" },
   "devDependencies": {
     "@types/node": "26.6.2",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "typescript": "7.0.2"
   }
 }
