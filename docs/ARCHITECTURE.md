@@ -26,7 +26,7 @@ The phone encodes H.264. ADB forwards the session's random scrcpy socket to a dy
 
 | Location | Responsibility |
 | --- | --- |
-| `src/droiddock/protocol.ts` | Version/hash constants, incremental video framing, control validation and serialization. |
+| `src/droiddock/protocol.ts` | Version/hash constants, incremental video framing, control validation and serialization, and bounded parsing of device clipboard replies. |
 | `src/droiddock/session.ts` | Verified phone discovery, pinned server launch, ADB forward, video/control sockets, resource cleanup, and a fixed sanitized startup-progress vocabulary. |
 | `src/droiddock/server.ts` | Loopback HTTP assets loaded once at startup, request validation, WebSocket ownership, session lifecycle, current-session progress, status. |
 | `src/droiddock/config.ts` | Local config and environment overrides. |

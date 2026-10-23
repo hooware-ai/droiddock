@@ -792,3 +792,48 @@ test('partial helper-private paste file is retained for verified cleanup retry',
   assert.equal(session.pasteCleanup.size, 0);
   assert.ok(state.calls.some(call => call.args.join(' ') === `-s NEW shell run-as ai.hooware.droiddock.paste rm -f files/paste/${id}`));
 });
+
+test('copy from phone is validated, controller-only, and never delivered after handoff', { timeout: 15000 }, async t => {
+  const bridge = await fixture(t, `
+    import { CopyFromPhoneError, COPY_MESSAGES } from './protocol.js';
+    export class ScrcpySession {
+      constructor(root, onEvent) { Object.assign(this, { root, onEvent }); }
+      async start() { this.onEvent({ type:'video', codec:'h264', width:1, height:1 }); }
+      copyFromPhone(source) {
+        if (source === 'clipboard') return Promise.reject(new CopyFromPhoneError(COPY_MESSAGES.timeout));
+        return new Promise(resolve => setTimeout(() => resolve('SYNTHETIC_CLIPBOARD_TEXT'), 400));
+      }
+      async stop() {}
+    }
+  `);
+  const errors = () => bridge.messages.filter(message => message.type === 'inputError').map(message => message.message);
+  bridge.sendRaw(JSON.stringify({ type: 'copyFromPhone', source: 'selection' }));
+  await until(() => errors().includes('Connect your phone first.'));
+  bridge.send('connect');
+  await until(async () => (await bridge.status()).state === 'connected');
+  for (const invalid of [{ type: 'copyFromPhone' }, { type: 'copyFromPhone', source: 'cut' }, { type: 'copyFromPhone', source: 'selection', extra: 1 }]) {
+    const before = errors().length;
+    bridge.sendRaw(JSON.stringify(invalid));
+    await until(() => errors().length > before);
+    assert.equal(errors().at(-1), 'Invalid copy request.');
+  }
+  bridge.sendRaw(JSON.stringify({ type: 'copyFromPhone', source: 'selection' }));
+  const reply = await until(() => bridge.messages.find(message => message.type === 'phoneClipboard'));
+  assert.equal(reply.text, 'SYNTHETIC_CLIPBOARD_TEXT');
+  bridge.sendRaw(JSON.stringify({ type: 'copyFromPhone', source: 'clipboard' }));
+  const failure = await until(() => bridge.messages.find(message => message.type === 'copyError'));
+  assert.match(failure.message, /No text came back from the phone within 5 seconds/);
+  assert.doesNotMatch(JSON.stringify(await bridge.status()), /SYNTHETIC_CLIPBOARD/);
+
+  // A reply that settles after handoff reaches neither the old nor the new controller.
+  bridge.sendRaw(JSON.stringify({ type: 'copyFromPhone', source: 'selection' }));
+  const replacement = new WebSocket(`ws://${new URL(bridge.origin).host}/stream?takeover=1`, { origin: bridge.origin });
+  const replacementMessages = [];
+  replacement.on('error', () => {});
+  replacement.on('message', data => replacementMessages.push(JSON.parse(data.toString())));
+  t.after(() => replacement.terminate());
+  await once(replacement, 'open');
+  await delay(700);
+  assert.equal(bridge.messages.filter(message => message.type === 'phoneClipboard').length, 1);
+  assert.equal(replacementMessages.some(message => message.type === 'phoneClipboard'), false);
+});
