@@ -7,53 +7,63 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// scrcpy 4.1 audio codec ids (develop.md). 0 and 1 in the codec position
-// disable the stream: 0 = capture unavailable (video continues), 1 = error.
+// scrcpy 4.1 audio codec ids (develop.md). 0 means capture unavailable and
+// video continues; 1 is a fatal server configuration error for the session.
 export const AUDIO_CODECS = { opus: 0x6f707573, aac: 0x00616163, flac: 0x666c6163, raw: 0x00726177 };
 // Opus packets are a few hundred bytes; raw PCM packets are larger. Bound the buffer anyway.
 export const MAX_AUDIO_PACKET = 1 << 20;
 
 export class AudioStreamParser {
   constructor(maxPacket = MAX_AUDIO_PACKET) {
-    this.buffer = new Uint8Array(0);
+    if (!Number.isInteger(maxPacket) || maxPacket < 1 || maxPacket > MAX_AUDIO_PACKET) throw new RangeError('Invalid audio packet cap.');
+    this.buffer = new Uint8Array(12);
+    this.length = 0;
+    this.needed = 4;
     this.codec = undefined;
     this.maxPacket = maxPacket;
   }
   push(chunk) {
-    const next = new Uint8Array(this.buffer.length + chunk.length);
-    next.set(this.buffer); next.set(chunk, this.buffer.length);
-    this.buffer = next;
+    if (!(chunk instanceof Uint8Array)) throw new TypeError('Audio input must be bytes.');
     const events = [];
-    const view = () => new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
-    if (this.codec === undefined) {
-      if (this.buffer.length < 4) return events;
-      const id = view().getUint32(0);
-      this.buffer = this.buffer.subarray(4);
-      if (id === 0 || id === 1) { this.codec = null; events.push({ type: 'disabled', error: id === 1 }); }
-      else {
-        const name = Object.keys(AUDIO_CODECS).find(key => AUDIO_CODECS[key] === id);
-        if (!name) throw new Error('Unknown audio codec.');
-        this.codec = name;
-        events.push({ type: 'codec', codec: name });
+    let offset = 0;
+    while (offset < chunk.length) {
+      if (this.codec === null) throw new Error('Data after a disabled audio stream.');
+      const count = Math.min(this.needed - this.length, chunk.length - offset);
+      this.buffer.set(chunk.subarray(offset, offset + count), this.length);
+      this.length += count;
+      offset += count;
+      if (this.length < this.needed) break;
+      const view = new DataView(this.buffer.buffer);
+      if (this.codec === undefined) {
+        const id = view.getUint32(0);
+        this.length = 0;
+        if (id === 0 || id === 1) { this.codec = null; events.push({ type: 'disabled', error: id === 1, fatal: id === 1 }); }
+        else {
+          const name = Object.keys(AUDIO_CODECS).find(key => AUDIO_CODECS[key] === id);
+          if (!name) throw new Error('Unknown audio codec.');
+          this.codec = name;
+          events.push({ type: 'codec', codec: name });
+          this.needed = 12;
+        }
+        continue;
       }
-    }
-    if (this.codec === null) {
-      if (this.buffer.length) throw new Error('Data after a disabled audio stream.');
-      return events;
-    }
-    while (this.buffer.length >= 12) {
-      const header = view();
-      const high = header.getUint32(0), low = header.getUint32(4), size = header.getUint32(8);
-      // Audio has no session packets, so the top (session/media) bit must be clear.
-      if (high & 0x80000000) throw new Error('Unexpected audio session packet.');
-      if (!size || size > this.maxPacket) throw new Error('Invalid audio packet size.');
-      if (this.buffer.length < 12 + size) break;
-      const data = this.buffer.slice(12, 12 + size);
-      const config = (high & 0x40000000) !== 0;
-      const key = (high & 0x20000000) !== 0;
+      if (this.needed === 12) {
+        const high = view.getUint32(0), size = view.getUint32(8);
+        if (high & 0x80000000) throw new Error('Unexpected audio session packet.');
+        if (!size || size > this.maxPacket) throw new Error('Invalid audio packet size.');
+        this.needed = 12 + size;
+        const packet = new Uint8Array(this.needed);
+        packet.set(this.buffer.subarray(0, 12));
+        this.buffer = packet;
+        continue;
+      }
+      const high = view.getUint32(0), low = view.getUint32(4);
+      const data = this.buffer.slice(12, this.needed);
       const pts = (high & 0x1fffffff) * 0x100000000 + low;
-      events.push(config ? { type: 'config', data } : { type: 'packet', pts, key, data });
-      this.buffer = this.buffer.subarray(12 + size);
+      events.push(high & 0x40000000 ? { type: 'config', data } : { type: 'packet', pts, key: !!(high & 0x20000000), data });
+      this.buffer = new Uint8Array(12);
+      this.length = 0;
+      this.needed = 12;
     }
     return events;
   }
@@ -110,8 +120,10 @@ async function encodeTone() {
   return { chunks, head: description?.length === 19 ? description : opusHead(312) };
 }
 function scrcpyStream({ chunks, head }) {
+  // Android timestamps are monotonic-clock values, not zero-based stream time.
+  const ptsOrigin = 25_000_000_000;
   const parts = [new Uint8Array([0x6f, 0x70, 0x75, 0x73]), frameAudioPacket({ config: true, data: head })];
-  for (const chunk of chunks) parts.push(frameAudioPacket({ pts: chunk.pts, data: chunk.data }));
+  for (const chunk of chunks) parts.push(frameAudioPacket({ pts: ptsOrigin + chunk.pts, data: chunk.data }));
   const total = parts.reduce((sum, part) => sum + part.length, 0);
   const bytes = new Uint8Array(total); let offset = 0;
   for (const part of parts) { bytes.set(part, offset); offset += part.length; }
@@ -175,15 +187,22 @@ async function realtime({ config, packets }, audible) {
   const params = new URLSearchParams(location.search);
   const target = Number(params.get('target') || 60) / 1000, jitterMs = 15, busyMs = Number(params.get('busy') || 0);
   const busy = busyMs ? setInterval(() => { const end = performance.now() + busyMs; while (performance.now() < end); }, 16) : 0;
-  let next = 0, underruns = 0; const buffered = []; const handlerMs = [];
+  try {
+  let next = 0, underruns = 0, decoded = 0, scheduled = 0, ended = 0;
+  let finalPlayback;
+  const buffered = [], handlerMs = [];
   const decoder = new AudioDecoder({
     output(data) {
       const t0 = performance.now();
+      decoded++;
       const buffer = ctx.createBuffer(CHANNELS, data.numberOfFrames, RATE);
       for (let c = 0; c < CHANNELS; c++) { const plane = new Float32Array(data.numberOfFrames); data.copyTo(plane, { planeIndex: c, format: 'f32-planar' }); buffer.copyToChannel(plane, c); }
       data.close();
       if (next < ctx.currentTime) { if (next) underruns++; next = ctx.currentTime + target; }
-      const source = ctx.createBufferSource(); source.buffer = buffer; source.connect(gain); source.start(next);
+      const source = ctx.createBufferSource(); source.buffer = buffer; source.connect(gain);
+      finalPlayback = new Promise(resolve => { source.onended = () => { ended++; source.disconnect(); resolve(); }; });
+      source.start(next);
+      scheduled++;
       buffered.push((next - ctx.currentTime) * 1000);
       next += buffer.duration;
       handlerMs.push(performance.now() - t0);
@@ -191,27 +210,34 @@ async function realtime({ config, packets }, audible) {
     error(e) { report.realtimeError = String(e); },
   });
   decoder.configure({ codec: 'opus', sampleRate: RATE, numberOfChannels: CHANNELS, description: config.data });
-  const start = performance.now();
+  const start = performance.now(), firstPts = packets[0].pts;
   await new Promise(done => {
     let i = 0;
     const tick = () => {
-      while (i < packets.length && packets[i].pts / 1000 <= performance.now() - start) {
+      while (i < packets.length && (packets[i].pts - firstPts) / 1000 <= performance.now() - start) {
         const p = packets[i++];
         decoder.decode(new EncodedAudioChunk({ type: 'key', timestamp: p.pts, data: p.data }));
       }
-      if (i >= packets.length) { setTimeout(done, 300); return; }
+      if (i >= packets.length) { done(); return; }
       setTimeout(tick, Math.max(0, 20 + (Math.random() * 2 - 1) * jitterMs));
     };
     tick();
   });
+  await decoder.flush();
   decoder.close();
-  clearInterval(busy);
+  if (decoded !== packets.length || scheduled !== decoded || !finalPlayback) throw new Error('Incomplete real-time decode or scheduling.');
+  await finalPlayback;
+  if (ended !== scheduled) throw new Error('Playback did not complete.');
   report.realtime = {
     audible, contextState: ctx.state, baseLatencyMs: +(ctx.baseLatency * 1000).toFixed(1), outputLatencyMs: +((ctx.outputLatency || 0) * 1000).toFixed(1),
-    targetBufferMs: target * 1000, arrivalJitterMs: jitterMs, mainThreadBusyMsPer16: busyMs, underruns, scheduledAheadMsP50: percentile(buffered, 0.5), scheduledAheadMsP95: percentile(buffered, 0.95),
+    targetBufferMs: target * 1000, arrivalJitterMs: jitterMs, mainThreadBusyMsPer16: busyMs, packetsSubmitted: packets.length, decoded, scheduled, ended,
+    firstPacketPtsUs: firstPts, completedPlayback: true, underruns, scheduledAheadMsP50: percentile(buffered, 0.5), scheduledAheadMsP95: percentile(buffered, 0.95),
     outputHandlerMsP95: percentile(handlerMs, 0.95), outputHandlerMsMax: +Math.max(...handlerMs).toFixed(2),
   };
-  await ctx.close();
+  } finally {
+    clearInterval(busy);
+    await ctx.close();
+  }
 }
 let prepared;
 (async () => {

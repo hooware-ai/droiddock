@@ -22,8 +22,8 @@ test('audio spike parser reads the scrcpy 4.1 codec id, config, and media packet
 });
 
 test('audio spike parser honors disable codes and rejects malformed streams', () => {
-  assert.deepEqual(new AudioStreamParser().push(id(0)), [{ type: 'disabled', error: false }]);
-  assert.deepEqual(new AudioStreamParser().push(id(1)), [{ type: 'disabled', error: true }]);
+  assert.deepEqual(new AudioStreamParser().push(id(0)), [{ type: 'disabled', error: false, fatal: false }]);
+  assert.deepEqual(new AudioStreamParser().push(id(1)), [{ type: 'disabled', error: true, fatal: true }]);
   assert.throws(() => new AudioStreamParser().push(concat(id(0), new Uint8Array([9]))), /Data after a disabled audio stream/);
   assert.throws(() => new AudioStreamParser().push(id(0x68323634)), /Unknown audio codec/);
   const session = new Uint8Array(12); session[0] = 0x80; session[11] = 1;
@@ -33,4 +33,15 @@ test('audio spike parser honors disable codes and rejects malformed streams', ()
   const oversize = new Uint8Array(12); new DataView(oversize.buffer).setUint32(8, MAX_AUDIO_PACKET + 1);
   // The size is rejected from the header, before any payload is buffered.
   assert.throws(() => new AudioStreamParser().push(concat(id(AUDIO_CODECS.opus), oversize)), /Invalid audio packet size/);
+});
+
+test('audio spike parser bounds allocations even for a large batched input chunk', () => {
+  const packet = frameAudioPacket({ pts: 25_000_000_000, data: new Uint8Array([1, 2, 3]) });
+  const large = concat(id(AUDIO_CODECS.opus), ...Array.from({ length: 10_000 }, () => packet));
+  const parser = new AudioStreamParser();
+  const events = parser.push(large);
+  assert.equal(events.length, 10_001);
+  assert.equal(events.at(-1).pts, 25_000_000_000);
+  assert.ok(parser.buffer.byteLength <= 12 + MAX_AUDIO_PACKET);
+  assert.throws(() => new AudioStreamParser().push(new Uint8Array(MAX_AUDIO_PACKET + 20)), /Data after a disabled audio stream/);
 });
